@@ -1,253 +1,161 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Flux Ultra</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <title>Flux</title>
     <script src="https://cdn.socketio.io/4.7.2/socketio.min.js"></script>
     <style>
-        :root { --navy: #010206; --accent: #007aff; --glass: rgba(255, 255, 255, 0.02); --border: rgba(255, 255, 255, 0.06); --iphone-top: env(safe-area-inset-top); --iphone-bottom: env(safe-area-inset-bottom); }
-        body { background: var(--navy); color: white; font-family: -apple-system, sans-serif; margin: 0; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        :root { --blue: #007AFF; --dark: #010204; --glass: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.1); }
+        body { background: var(--dark); color: white; font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
         
-        /* Auth */
-        #auth-ui { position: fixed; inset: 0; background: var(--navy); display: flex; align-items: center; justify-content: center; z-index: 100; transition: 0.5s; }
-        .glass-card { background: var(--glass); backdrop-filter: blur(30px); border: 1px solid var(--border); border-radius: 30px; padding: 40px 30px; width: 85%; max-width: 340px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-        input { width: 100%; padding: 15px; margin-bottom: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 14px; color: white; box-sizing: border-box; font-size: 1rem; -webkit-appearance: none; }
-        .btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 14px; color: white; font-weight: bold; cursor: pointer; font-size: 1rem; }
+        .tap { cursor: pointer; touch-action: manipulation; transition: 0.2s; -webkit-tap-highlight-color: transparent; }
+        .tap:active { opacity: 0.5; transform: scale(0.95); }
 
-        /* Main App Structure */
-        #main-ui { display: none; width: 100vw; height: 100vh; flex-direction: row; position: fixed; inset: 0; }
-        
-        /* Sidebar (Свайп слева) */
-        .sidebar { width: 280px; background: rgba(1, 2, 6, 0.9); border-right: 1px solid var(--border); backdrop-filter: blur(20px); display: flex; flex-direction: column; transform: translateX(-100%); transition: 0.3s; position: absolute; height: 100%; z-index: 20; padding-top: var(--iphone-top); }
-        .sidebar.open { transform: translateX(0); }
-        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); text-align: center; }
-        .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .chat-item { padding: 15px; border-radius: 14px; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.7); }
-        .chat-item.active { background: var(--accent); color: white; font-weight: 600; }
-        .chat-item:hover:not(.active) { background: var(--glass); }
+        #sidebar { width: 75px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 20px; background: rgba(0,0,0,0.2); }
+        .nav-btn { width: 50px; height: 50px; border-radius: 16px; background: var(--glass); display: flex; align-items: center; justify-content: center; font-size: 22px; border: 1px solid var(--border); }
 
-        /* Main Chat Area */
-        .main-content { flex: 1; display: flex; flex-direction: column; background: radial-gradient(at 50% 100%, rgba(0, 122, 255, 0.04), transparent 70%); }
-        .header { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 15px; justify-content: space-between; background: rgba(1, 2, 6, 0.8); backdrop-filter: blur(20px); z-index: 10; padding-top: var(--iphone-top); }
-        .messages { flex: 1; overflow-y: auto; padding: calc(75px + var(--iphone-top)) 15px 90px; display: flex; flex-direction: column; gap: 12px; }
+        #chat-area { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .header { padding: 15px; border-bottom: 1px solid var(--border); background: rgba(1,2,4,0.8); backdrop-filter: blur(10px); }
         
-        /* Input Bar */
-        .input-bar { position: fixed; bottom: 0; width: 100%; border-top: 1px solid var(--border); display: flex; align-items: center; padding: 10px 10px calc(10px + var(--iphone-bottom)); gap: 8px; background: rgba(1, 2, 6, 0.85); backdrop-filter: blur(20px); z-index: 10; box-sizing: border-box;}
-        .input-bar input { flex: 1; margin: 0; border-radius: 20px; padding: 12px 15px;}
-        
-        /* UI Elements */
-        .avatar { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); object-fit: cover; }
-        .bubble { background: var(--glass); border: 1px solid var(--border); padding: 10px 14px; border-radius: 16px; border-top-left-radius: 4px; max-width: 75%; position: relative; }
-        .self .bubble { background: var(--accent); border: none; align-self: flex-end; border-top-left-radius: 16px; border-top-right-radius: 4px; }
-        .verified { color: var(--accent); margin-left: 3px; }
-        .self .verified { color: white; }
-        .msg-block { display: flex; gap: 10px; align-items: flex-start; }
-        .msg-block.self { flex-direction: row-reverse; }
+        /* СИНЯЯ ГАЛОЧКА */
+        .v-badge { 
+            display: inline-flex; width: 14px; height: 14px; background: #007AFF; 
+            border-radius: 50%; margin-left: 5px; vertical-align: middle;
+            justify-content: center; align-items: center; box-shadow: 0 0 5px rgba(0,122,255,0.5);
+        }
+        .v-badge::after { content: '✓'; color: white; font-size: 9px; font-weight: 900; }
 
-        /* Modal Поиска */
-        #search-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: none; z-index: 30; align-items: center; justify-content: center; }
-        .search-results { width: 80%; max-width: 300px; max-height: 300px; overflow-y: auto; background: rgba(1,2,6,0.9); border-radius: 20px; padding: 10px;}
+        #msgs { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .input-box { padding: 15px 15px calc(15px + env(safe-area-inset-bottom)); display: flex; gap: 10px; background: var(--dark); border-top: 1px solid var(--border); }
+        input { flex: 1; background: var(--glass); border: 1px solid var(--border); padding: 14px; border-radius: 14px; color: white; outline: none; font-size: 16px; }
+        
+        /* МЕНЮ ВЫБОРА (+) */
+        #plus-menu { 
+            display: none; position: absolute; left: 85px; bottom: 80px; 
+            background: #1c1c1e; border: 1px solid var(--border); border-radius: 18px; 
+            flex-direction: column; padding: 8px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .menu-item { padding: 12px 20px; border-radius: 10px; white-space: nowrap; font-size: 15px; }
+        .menu-item:hover { background: var(--glass); }
+
+        #auth { position: fixed; inset: 0; background: var(--dark); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; padding: 20px; }
     </style>
 </head>
 <body>
 
-<div id="auth-ui">
-    <div class="glass-card">
-        <h1 style="font-size: 3.5rem; font-weight: 900; letter-spacing: -3px; margin: 0; background: linear-gradient(#fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">FLUX</h1>
-        <p style="opacity: 0.5; margin-bottom: 25px;">Premium Mobile Network</p>
-        <div class="input-group">
-            <input type="text" id="nick" placeholder="Никнейм" autocorrect="off" autocapitalize="off">
-            <input type="password" id="pass" placeholder="Пароль">
-            <button class="btn" onclick="login()">Войти во Flux</button>
-        </div>
+<div id="auth">
+    <h1 style="letter-spacing: -2px; font-size: 3rem; margin: 0;">FLUX</h1>
+    <p style="opacity: 0.5; margin-bottom: 20px;">Будущее общение здесь!</p>
+    <input type="text" id="ln" placeholder="Никнейм" style="width: 280px;">
+    <input type="password" id="lp" placeholder="Пароль" style="width: 280px;">
+    <button class="tap" onclick="login()" style="width: 280px; background: var(--blue); border: none; padding: 16px; border-radius: 16px; color: white; font-weight: bold; font-size: 16px;">Войти</button>
+</div>
+
+<div id="sidebar">
+    <div class="nav-btn tap" onclick="switchChat('community')">🏠</div>
+    <div class="nav-btn tap" onclick="toggleMenu()">+</div>
+    
+    <div id="plus-menu">
+        <div class="menu-item tap" onclick="createCh()">📢 Создать канал</div>
+        <div class="menu-item tap" onclick="findUs()">👤 Найти человека (ЛС)</div>
     </div>
 </div>
 
-<div id="main-ui">
-    <div class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <img src="" id="sidebar-av" class="avatar" style="width: 50px; height: 50px; margin-bottom: 10px; cursor: pointer;" onclick="document.getElementById('file-input').click()">
-            <div id="sidebar-nick" style="font-weight: 700;"></div>
-            <p style="opacity:0.5; font-size:0.8rem;">Основатель ✔</p>
-            <input type="file" id="file-input" style="display:none;" onchange="uploadAvatar()">
-        </div>
-        <div class="chat-list" id="chat-list">
-            </div>
-        <button class="btn" style="border-radius:0; padding:12px; font-size:0.9rem;" onclick="openSearch()">🔍 Найти человека</button>
+<div id="chat-area">
+    <div class="header">
+        <b id="c-title"># Flux Community</b>
     </div>
-
-    <div class="main-content">
-        <div class="header">
-            <button style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="toggleSidebar()">☰</button>
-            <div class="chat-title" id="chat-title"># Flux Community</div>
-            <img src="" id="header-av" class="avatar" style="width:30px; height:30px;">
-        </div>
-        <div class="messages" id="msgs"></div>
-        <div class="input-bar">
-            <input type="text" id="msg-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
-            <button class="btn" style="width: 45px; padding:12px; border-radius:50%;" onclick="send()">🚀</button>
-        </div>
-    </div>
-</div>
-
-<div id="search-modal" onclick="closeSearch(event)">
-    <div class="glass-card" style="padding: 20px;" onclick="event.stopPropagation()">
-        <h3>Поиск людей</h3>
-        <input type="text" id="search-input" placeholder="Введи ник..." oninput="doSearch()">
-        <div class="search-results" id="search-results"></div>
+    <div id="msgs"></div>
+    <div class="input-box">
+        <input type="text" id="mt" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
+        <button class="tap" onclick="send()" style="background: var(--blue); border: none; width: 50px; height: 50px; border-radius: 15px; color: white; font-size: 20px;">→</button>
     </div>
 </div>
 
 <script>
     const socket = io();
-    let user = null;
+    let me = null;
     let activeChat = 'community';
-    let myChats = { public: [], private: [] };
 
-    // Auth
     async function login() {
-        const n = document.getElementById('nick').value;
-        const p = document.getElementById('pass').value;
-        const res = await fetch('/api/auth', {
+        const n = document.getElementById('ln').value;
+        const p = document.getElementById('lp').value;
+        const r = await fetch('/api/auth', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ action: 'login', nick: n, password: p })
+            body: JSON.stringify({ nick: n, password: p })
         });
-        const data = await res.json();
-        if(data.status === 'ok') {
-            user = data.user;
-            document.getElementById('auth-ui').style.opacity = '0';
-            setTimeout(() => { document.getElementById('auth-ui').style.display = 'none'; document.getElementById('main-ui').style.display = 'flex'; }, 500);
-            
-            startApp();
-        } else alert('Неверные данные! Попробуй bloody / Zavoz7152');
+        const d = await r.json();
+        if(d.status === 'ok') {
+            me = d.user;
+            document.getElementById('auth').style.display = 'none';
+            socket.emit('join', { chat_id: 'community' });
+        } else alert("Ошибка входа!");
     }
 
-    // Запуск приложения
-    function startApp() {
-        document.getElementById('sidebar-nick').innerText = user.nick;
-        updateUserAvatars(user.avatar);
-        
-        socket.emit('get_my_chats', { nick: user.nick });
-        selectChat('community', 'Flux Community');
+    function toggleMenu() {
+        const m = document.getElementById('plus-menu');
+        m.style.display = (m.style.display === 'flex') ? 'none' : 'flex';
     }
 
-    // Смена аватаров в UI
-    function updateUserAvatars(url) {
-        document.getElementById('sidebar-av').src = url;
-        document.getElementById('header-av').src = url;
+    function createCh() {
+        toggleMenu();
+        const name = prompt("Введите название канала:");
+        if(name) socket.emit('create_channel', { name: name, owner: me.nick });
     }
 
-    // Загрузка фото
-    async function uploadAvatar() {
-        const file = document.getElementById('file-input').files[0];
-        if(!file) return;
-        const formData = new FormData();
-        formData.append('avatar', file);
-        formData.append('nick', user.nick);
-        const res = await fetch('/api/upload_avatar', { method: 'POST', body: formData });
-        const data = await res.json();
-        if(data.status === 'ok') {
-            user.avatar = data.avatar_url;
-            updateUserAvatars(user.avatar);
-            alert('Аватар обновлен!');
-        } else alert(data.message);
+    function findUs() {
+        toggleMenu();
+        const who = prompt("Ник пользователя для ЛС:");
+        if(who) socket.emit('search_user', { nick: who, my_nick: me.nick });
     }
 
-    // Боковое меню
-    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
-    
-    // Выбор чата (ЛС или Общий)
-    function selectChat(id, name) {
-        activeChat = id;
-        document.getElementById('chat-title').innerText = name.includes(user.nick) ? name.replace(user.nick, '').replace('&', '').trim() : name;
-        if(id !== 'community') document.getElementById('chat-title').innerText = 'ЛС: ' + document.getElementById('chat-title').innerText;
-        
-        socket.emit('join_chat', { chat_id: activeChat });
-        document.getElementById('sidebar').classList.remove('open');
-        renderChatList(); // Перерисовать список, чтобы подсветить активный
-    }
+    socket.on('user_found', d => {
+        activeChat = d.chat_id;
+        document.getElementById('c-title').innerText = "👤 " + d.name;
+        socket.emit('join', { chat_id: activeChat });
+    });
 
-    // Отправка сообщения
     function send() {
-        const input = document.getElementById('msg-input');
-        if(!input.value.trim()) return;
-        socket.emit('new_msg', { chat_id: activeChat, sender: user.nick, sender_av: user.avatar, text: input.value });
-        input.value = '';
+        const t = document.getElementById('mt');
+        if(!t.value) return;
+        socket.emit('send_msg', { chat_id: activeChat, sender: me.nick, text: t.value });
+        t.value = '';
     }
 
-    // --- Socket Events ---
-    socket.on('my_chats_list', (data) => {
-        myChats = data;
-        renderChatList();
+    socket.on('broadcast_msg', m => {
+        if(m.chat_id !== activeChat) return;
+        renderMsg(m);
     });
 
-    socket.on('load_msgs', (msgs) => {
-        const container = document.getElementById('msgs');
-        container.innerHTML = '';
-        msgs.forEach(renderMsg);
-        container.scrollTop = container.scrollHeight;
+    socket.on('history', data => {
+        document.getElementById('msgs').innerHTML = '';
+        data.forEach(renderMsg);
     });
-
-    socket.on('msg_broadcast', (msg) => {
-        if(msg.chat_id === activeChat) {
-            renderMsg(msg);
-            document.getElementById('msgs').scrollTop = document.getElementById('msgs').scrollHeight;
-        }
-    });
-
-    // --- UI Rendering ---
-    function renderChatList() {
-        const container = document.getElementById('chat-list');
-        container.innerHTML = '';
-        // Public
-        myChats.public.forEach(c => {
-            container.innerHTML += `<div class="chat-item ${activeChat === c.id ? 'active' : ''}" onclick="selectChat('${c.id}', '${c.name}')"># ${c.name}</div>`;
-        });
-        // ЛС
-        myChats.private.forEach(c => {
-            let otherUser = c.id.replace('chat_', '').replace(user.nick, '').replace('_', '').trim();
-            container.innerHTML += `<div class="chat-item ${activeChat === c.id ? 'active' : ''}" onclick="selectChat('${c.id}', '${otherUser}')">👤 ${otherUser}</div>`;
-        });
-    }
 
     function renderMsg(m) {
-        const isSelf = m.sender === user.nick;
-        const verified = m.sender === 'bloody' ? '<span class="verified">✔</span>' : '';
+        const isS = m.sender === me.nick;
+        const v = m.is_v ? '<div class="v-badge"></div>' : '';
         const html = `
-            <div class="msg-block ${isSelf ? 'self' : ''}">
-                <img src="${m.sender_av}" class="avatar">
-                <div class="bubble">
-                    ${isSelf ? '' : `<div style="font-size:0.7rem; opacity:0.6; margin-bottom:3px;"><b>${m.sender}</b>${verified}</div>`}
-                    <div>${m.text}</div>
-                    <div style="font-size:0.6rem; opacity:0.4; text-align:right; margin-top:3px;">${m.time}</div>
+            <div style="align-self: ${isS ? 'flex-end' : 'flex-start'}; max-width: 80%;">
+                <div style="font-size: 11px; opacity: 0.5; margin-bottom: 4px; text-align: ${isS ? 'right' : 'left'}">
+                    ${m.sender}${v} • ${m.time}
+                </div>
+                <div style="background: ${isS ? 'var(--blue)' : 'var(--glass)'}; padding: 12px 16px; border-radius: 18px; border-top-${isS?'right':'left'}-radius: 4px;">
+                    ${m.text}
                 </div>
             </div>`;
-        document.getElementById('msgs').innerHTML += html;
+        const ms = document.getElementById('msgs');
+        ms.innerHTML += html;
+        ms.scrollTop = ms.scrollHeight;
     }
 
-    // --- Поиск для ЛС ---
-    function openSearch() { document.getElementById('search-modal').style.display = 'flex'; }
-    function closeSearch(e) { document.getElementById('search-modal').style.display = 'none'; }
-    async function doSearch() {
-        const q = document.getElementById('search-input').value;
-        const res = await fetch(`/api/search?q=${q}&my_nick=${user.nick}`);
-        const users = await res.json();
-        const results = document.getElementById('search-results');
-        results.innerHTML = users.map(u => `
-            <div style="display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--border); cursor:pointer;" onclick="startDM('${u.nick}')">
-                <img src="${u.avatar}" class="avatar" style="width:25px; height:25px;">
-                <div>${u.nick} ${u.is_admin ? '✔' : ''}</div>
-            </div>
-        `).join('');
-    }
-    // Начать ЛС
-    function startDM(nick) {
-        // Создаем уникальный ID чата (сортируем ники, чтобы chat_a_b == chat_b_a)
-        const id = 'chat_' + [user.nick, nick].sort().join('_');
-        selectChat(id, nick);
-        closeSearch();
-        socket.emit('get_my_chats', { nick: user.nick }); // Обновить список чатов слева
+    // Закрыть меню при клике вне его
+    window.onclick = function(event) {
+        if (!event.target.closest('.nav-btn')) {
+            document.getElementById('plus-menu').style.display = 'none';
+        }
     }
 </script>
 </body>
