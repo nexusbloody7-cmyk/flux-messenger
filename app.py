@@ -1,17 +1,15 @@
 import eventlet
 eventlet.monkey_patch()
 
-import os
-import sqlite3
-import uuid
+import os, sqlite3, uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, emit, join_room
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'flux_fixed_v5'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.config['SECRET_KEY'] = 'flux_ultimate_2026'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=False, engineio_logger=False)
 
 def get_db():
     conn = sqlite3.connect('flux.db')
@@ -25,7 +23,6 @@ def init_db():
     cur.execute('CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT)')
     cur.execute('CREATE TABLE IF NOT EXISTS messages (chat_id TEXT, sender TEXT, text TEXT, time TEXT, is_verified INTEGER)')
     
-    # Твой пароль в открытом виде для ПЕРВОЙ инициализации (потом захешируем)
     pw_hash = generate_password_hash('Zavoz7152')
     cur.execute("INSERT OR REPLACE INTO users VALUES ('bloody', ?, 'https://img.icons8.com/fluency/96/user-male-circle.png', 1)", (pw_hash,))
     
@@ -45,12 +42,9 @@ def auth():
     nick = d.get('nick', '').lower().strip()
     pw = d.get('password', '')
 
-    # ЖЕСТКАЯ ПРОВЕРКА ДЛЯ ТЕБЯ (Мастер-вход)
+    # Твой железобетонный вход
     if nick == 'bloody' and pw == 'Zavoz7152':
-        return jsonify({
-            "status": "ok", 
-            "user": {"nick": "bloody", "avatar": "https://img.icons8.com/fluency/96/user-male-circle.png", "is_verified": 1}
-        })
+        return jsonify({"status": "ok", "user": {"nick": "bloody", "avatar": "https://img.icons8.com/fluency/96/user-male-circle.png", "is_verified": 1}})
 
     conn = get_db()
     user = conn.execute('SELECT * FROM users WHERE nick = ?', (nick,)).fetchone()
@@ -61,7 +55,6 @@ def auth():
     
     return jsonify({"status": "error"})
 
-# ОСТАЛЬНАЯ ЛОГИКА (create_channel, send_msg, join) БЕЗ ИЗМЕНЕНИЙ...
 @socketio.on('search_user')
 def search_user(data):
     conn = get_db()
@@ -70,6 +63,8 @@ def search_user(data):
         pair = sorted([data['my_nick'], target['nick']])
         chat_id = f"dm_{pair[0]}_{pair[1]}"
         emit('user_found', {'chat_id': chat_id, 'name': target['nick']})
+    else:
+        emit('error_msg', 'Пользователь не найден')
 
 @socketio.on('create_channel')
 def create_channel(data):
@@ -77,7 +72,8 @@ def create_channel(data):
     conn = get_db()
     conn.execute('INSERT INTO chats VALUES (?, ?, ?, ?)', (c_id, data['name'], 'public', data['owner']))
     conn.commit()
-    emit('new_chat_available', {'id': c_id, 'name': data['name']}, broadcast=True)
+    # Сразу перекидываем создателя в его новый канал
+    emit('channel_created', {'chat_id': c_id, 'name': data['name']})
 
 @socketio.on('send_msg')
 def handle_msg(data):

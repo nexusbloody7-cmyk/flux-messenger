@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -9,70 +9,74 @@
         :root { --blue: #007AFF; --dark: #010204; --glass: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.1); }
         body { background: var(--dark); color: white; font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
         
-        .tap { cursor: pointer; touch-action: manipulation; transition: 0.2s; -webkit-tap-highlight-color: transparent; border: none; outline: none; }
-        .tap:active { opacity: 0.5; transform: scale(0.95); }
+        /* Идеальные кнопки для мобилок */
+        .tap { cursor: pointer; touch-action: manipulation; transition: 0.1s; -webkit-tap-highlight-color: transparent; border: none; outline: none; user-select: none; }
+        .tap:active { opacity: 0.6; transform: scale(0.95); }
 
-        #sidebar { width: 70px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 15px; background: rgba(0,0,0,0.2); }
-        .nav-btn { width: 44px; height: 44px; border-radius: 14px; background: var(--glass); display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid var(--border); }
+        #sidebar { width: 70px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 15px; background: rgba(0,0,0,0.3); z-index: 10; }
+        .nav-btn { width: 44px; height: 44px; border-radius: 14px; background: var(--glass); display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid var(--border); color: white; }
 
         #chat-area { flex: 1; display: flex; flex-direction: column; position: relative; }
-        .header { padding: 12px 15px; border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); font-size: 14px; }
+        .header { padding: 15px; border-bottom: 1px solid var(--border); background: rgba(1,2,4,0.8); backdrop-filter: blur(10px); font-size: 15px; z-index: 5; }
         
-        /* СИНЯЯ ГАЛОЧКА */
+        /* Синяя галочка (каноничная) */
         .v-badge { 
-            display: inline-flex; width: 12px; height: 12px; background: var(--blue); 
+            display: inline-flex; width: 14px; height: 14px; background: var(--blue); 
             border-radius: 50%; margin-left: 5px; vertical-align: middle;
             justify-content: center; align-items: center;
         }
-        .v-badge::after { content: '✓'; color: white; font-size: 8px; font-weight: 900; }
+        .v-badge::after { content: '✓'; color: white; font-size: 9px; font-weight: bold; }
 
         #msgs { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; }
+        
+        /* Инпуты с защитой от растягивания */
         .input-box { padding: 10px 15px calc(15px + env(safe-area-inset-bottom)); display: flex; gap: 10px; background: var(--dark); border-top: 1px solid var(--border); }
+        input { background: var(--glass); border: 1px solid var(--border); padding: 12px 15px; border-radius: 14px; color: white; outline: none; font-size: 16px; box-sizing: border-box; width: 100%; }
         
-        /* Исправление ширины инпутов */
-        input { background: var(--glass); border: 1px solid var(--border); padding: 12px; border-radius: 12px; color: white; outline: none; font-size: 16px; box-sizing: border-box; }
-        
+        /* Выплывающее меню (+) */
         #plus-menu { 
             display: none; position: absolute; left: 75px; bottom: 80px; 
-            background: #1c1c1e; border: 1px solid var(--border); border-radius: 15px; 
-            flex-direction: column; padding: 5px; z-index: 100;
+            background: #1c1c1e; border: 1px solid var(--border); border-radius: 14px; 
+            flex-direction: column; padding: 6px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.7);
         }
-        .menu-item { padding: 10px 15px; border-radius: 8px; white-space: nowrap; font-size: 14px; }
+        .menu-item { padding: 12px 16px; border-radius: 10px; white-space: nowrap; font-size: 14px; color: white; text-align: left; background: transparent; }
+        .menu-item:active { background: var(--glass); }
 
-        /* ОГРАНИЧЕНИЕ ШИРИНЫ АВТОРИЗАЦИИ */
+        /* Компактная авторизация */
         #auth { position: fixed; inset: 0; background: var(--dark); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
         .auth-card { width: 100%; max-width: 300px; text-align: center; }
-        .auth-card input { width: 100%; margin-bottom: 10px; }
-        .auth-card button { width: 100%; padding: 14px; background: var(--blue); border-radius: 12px; color: white; font-weight: bold; }
+        .auth-card input { margin-bottom: 12px; }
+        .auth-btn { width: 100%; padding: 14px; background: var(--blue); border-radius: 14px; color: white; font-weight: bold; font-size: 16px; margin-top: 5px; }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-card">
-        <h1 style="letter-spacing: -2px; font-size: 2.5rem; margin: 0;">FLUX</h1>
-        <p style="opacity: 0.5; margin-bottom: 25px; font-size: 0.9rem;">Будущее общение здесь!</p>
+        <h1 style="font-size: 2.8rem; margin: 0 0 5px 0; letter-spacing: -1px;">FLUX</h1>
+        <p style="opacity: 0.5; margin-bottom: 25px; font-size: 14px;">Будущее общение здесь!</p>
         <input type="text" id="ln" placeholder="Никнейм">
         <input type="password" id="lp" placeholder="Пароль">
-        <button class="tap" onclick="login()">Войти</button>
+        <button class="tap auth-btn" onclick="login()">Войти</button>
     </div>
 </div>
 
 <div id="sidebar">
-    <div class="nav-btn tap" onclick="switchChat('community')">🏠</div>
-    <div class="nav-btn tap" onclick="toggleMenu()">+</div>
+    <button class="nav-btn tap" onclick="goHome()">🏠</button>
+    <button class="nav-btn tap" onclick="toggleMenu(event)">➕</button>
+    
     <div id="plus-menu">
-        <div class="menu-item tap" onclick="createCh()">📢 Канал</div>
-        <div class="menu-item tap" onclick="findUs()">👤 Личка</div>
+        <button class="menu-item tap" onclick="createCh()">📢 Создать канал</button>
+        <button class="menu-item tap" onclick="findUs()">👤 Написать в ЛС</button>
     </div>
 </div>
 
 <div id="chat-area">
-    <div class="header"><b id="c-title"># Community</b></div>
+    <div class="header"><b id="c-title"># Flux Community</b></div>
     <div id="msgs"></div>
     <div class="input-box">
         <input type="text" id="mt" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
-        <button class="tap" onclick="send()" style="background: var(--blue); width: 45px; height: 45px; border-radius: 12px; color: white;">→</button>
+        <button class="tap" onclick="send()" style="background: var(--blue); width: 48px; min-width: 48px; height: 48px; border-radius: 14px; color: white; font-size: 18px; display: flex; align-items: center; justify-content: center;">➤</button>
     </div>
 </div>
 
@@ -84,45 +88,56 @@
     async function login() {
         const n = document.getElementById('ln').value;
         const p = document.getElementById('lp').value;
+        if(!n || !p) return;
         const r = await fetch('/api/auth', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ nick: n, password: p })
         });
         const d = await r.json();
         if(d.status === 'ok') {
             me = d.user;
             document.getElementById('auth').style.display = 'none';
-            socket.emit('join', { chat_id: 'community' });
-        } else alert("Неверный пароль!");
+            joinChat('community', '# Flux Community');
+        } else {
+            alert("Неверный логин или пароль");
+        }
     }
 
-    function toggleMenu() {
+    function toggleMenu(e) {
+        e.stopPropagation();
         const m = document.getElementById('plus-menu');
         m.style.display = (m.style.display === 'flex') ? 'none' : 'flex';
     }
 
     function createCh() {
-        toggleMenu();
-        const name = prompt("Название канала:");
+        document.getElementById('plus-menu').style.display = 'none';
+        const name = prompt("Введите название нового канала:");
         if(name) socket.emit('create_channel', { name: name, owner: me.nick });
     }
 
     function findUs() {
-        toggleMenu();
-        const who = prompt("Ник пользователя:");
-        if(who) socket.emit('search_user', { nick: who, my_nick: me.nick });
+        document.getElementById('plus-menu').style.display = 'none';
+        const who = prompt("Введите ник пользователя:");
+        if(who) socket.emit('search_user', { nick: who.toLowerCase(), my_nick: me.nick });
     }
 
-    socket.on('user_found', d => {
-        activeChat = d.chat_id;
-        document.getElementById('c-title').innerText = "👤 " + d.name;
-        socket.emit('join', { chat_id: activeChat });
-    });
+    function goHome() {
+        joinChat('community', '# Flux Community');
+    }
+
+    function joinChat(id, title) {
+        activeChat = id;
+        document.getElementById('c-title').innerText = title;
+        socket.emit('join', { chat_id: id });
+    }
+
+    socket.on('channel_created', d => joinChat(d.chat_id, "📢 " + d.name));
+    socket.on('user_found', d => joinChat(d.chat_id, "👤 " + d.name));
+    socket.on('error_msg', msg => alert(msg));
 
     function send() {
         const t = document.getElementById('mt');
-        if(!t.value) return;
+        if(!t.value.trim()) return;
         socket.emit('send_msg', { chat_id: activeChat, sender: me.nick, text: t.value });
         t.value = '';
     }
@@ -135,10 +150,10 @@
         const v = m.is_v ? '<div class="v-badge"></div>' : '';
         const html = `
             <div style="align-self: ${isS ? 'flex-end' : 'flex-start'}; max-width: 85%;">
-                <div style="font-size: 10px; opacity: 0.5; margin-bottom: 2px; text-align: ${isS ? 'right' : 'left'}">
+                <div style="font-size: 11px; opacity: 0.5; margin-bottom: 4px; text-align: ${isS ? 'right' : 'left'}">
                     ${m.sender}${v} • ${m.time}
                 </div>
-                <div style="background: ${isS ? 'var(--blue)' : 'var(--glass)'}; padding: 10px 14px; border-radius: 15px; border-top-${isS?'right':'left'}-radius: 4px; font-size: 15px;">
+                <div style="background: ${isS ? 'var(--blue)' : 'var(--glass)'}; padding: 12px 16px; border-radius: 16px; border-top-${isS?'right':'left'}-radius: 4px; font-size: 15px; word-wrap: break-word;">
                     ${m.text}
                 </div>
             </div>`;
@@ -147,7 +162,8 @@
         ms.scrollTop = ms.scrollHeight;
     }
 
-    window.onclick = e => { if (!e.target.closest('.nav-btn')) document.getElementById('plus-menu').style.display = 'none'; }
+    // Закрытие меню при клике в любое другое место
+    window.onclick = () => { document.getElementById('plus-menu').style.display = 'none'; };
 </script>
 </body>
 </html>
