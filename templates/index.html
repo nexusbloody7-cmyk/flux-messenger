@@ -9,67 +9,70 @@
         :root { --blue: #007AFF; --dark: #010204; --glass: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.1); }
         body { background: var(--dark); color: white; font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
         
-        .tap { cursor: pointer; touch-action: manipulation; transition: 0.2s; -webkit-tap-highlight-color: transparent; }
+        .tap { cursor: pointer; touch-action: manipulation; transition: 0.2s; -webkit-tap-highlight-color: transparent; border: none; outline: none; }
         .tap:active { opacity: 0.5; transform: scale(0.95); }
 
-        #sidebar { width: 75px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 20px; background: rgba(0,0,0,0.2); }
-        .nav-btn { width: 50px; height: 50px; border-radius: 16px; background: var(--glass); display: flex; align-items: center; justify-content: center; font-size: 22px; border: 1px solid var(--border); }
+        #sidebar { width: 70px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 15px; background: rgba(0,0,0,0.2); }
+        .nav-btn { width: 44px; height: 44px; border-radius: 14px; background: var(--glass); display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid var(--border); }
 
         #chat-area { flex: 1; display: flex; flex-direction: column; position: relative; }
-        .header { padding: 15px; border-bottom: 1px solid var(--border); background: rgba(1,2,4,0.8); backdrop-filter: blur(10px); }
+        .header { padding: 12px 15px; border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); font-size: 14px; }
         
         /* СИНЯЯ ГАЛОЧКА */
         .v-badge { 
-            display: inline-flex; width: 14px; height: 14px; background: #007AFF; 
+            display: inline-flex; width: 12px; height: 12px; background: var(--blue); 
             border-radius: 50%; margin-left: 5px; vertical-align: middle;
-            justify-content: center; align-items: center; box-shadow: 0 0 5px rgba(0,122,255,0.5);
+            justify-content: center; align-items: center;
         }
-        .v-badge::after { content: '✓'; color: white; font-size: 9px; font-weight: 900; }
+        .v-badge::after { content: '✓'; color: white; font-size: 8px; font-weight: 900; }
 
-        #msgs { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
-        .input-box { padding: 15px 15px calc(15px + env(safe-area-inset-bottom)); display: flex; gap: 10px; background: var(--dark); border-top: 1px solid var(--border); }
-        input { flex: 1; background: var(--glass); border: 1px solid var(--border); padding: 14px; border-radius: 14px; color: white; outline: none; font-size: 16px; }
+        #msgs { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; }
+        .input-box { padding: 10px 15px calc(15px + env(safe-area-inset-bottom)); display: flex; gap: 10px; background: var(--dark); border-top: 1px solid var(--border); }
         
-        /* МЕНЮ ВЫБОРА (+) */
+        /* Исправление ширины инпутов */
+        input { background: var(--glass); border: 1px solid var(--border); padding: 12px; border-radius: 12px; color: white; outline: none; font-size: 16px; box-sizing: border-box; }
+        
         #plus-menu { 
-            display: none; position: absolute; left: 85px; bottom: 80px; 
-            background: #1c1c1e; border: 1px solid var(--border); border-radius: 18px; 
-            flex-direction: column; padding: 8px; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: none; position: absolute; left: 75px; bottom: 80px; 
+            background: #1c1c1e; border: 1px solid var(--border); border-radius: 15px; 
+            flex-direction: column; padding: 5px; z-index: 100;
         }
-        .menu-item { padding: 12px 20px; border-radius: 10px; white-space: nowrap; font-size: 15px; }
-        .menu-item:hover { background: var(--glass); }
+        .menu-item { padding: 10px 15px; border-radius: 8px; white-space: nowrap; font-size: 14px; }
 
-        #auth { position: fixed; inset: 0; background: var(--dark); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; padding: 20px; }
+        /* ОГРАНИЧЕНИЕ ШИРИНЫ АВТОРИЗАЦИИ */
+        #auth { position: fixed; inset: 0; background: var(--dark); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .auth-card { width: 100%; max-width: 300px; text-align: center; }
+        .auth-card input { width: 100%; margin-bottom: 10px; }
+        .auth-card button { width: 100%; padding: 14px; background: var(--blue); border-radius: 12px; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="auth">
-    <h1 style="letter-spacing: -2px; font-size: 3rem; margin: 0;">FLUX</h1>
-    <p style="opacity: 0.5; margin-bottom: 20px;">Будущее общение здесь!</p>
-    <input type="text" id="ln" placeholder="Никнейм" style="width: 280px;">
-    <input type="password" id="lp" placeholder="Пароль" style="width: 280px;">
-    <button class="tap" onclick="login()" style="width: 280px; background: var(--blue); border: none; padding: 16px; border-radius: 16px; color: white; font-weight: bold; font-size: 16px;">Войти</button>
+    <div class="auth-card">
+        <h1 style="letter-spacing: -2px; font-size: 2.5rem; margin: 0;">FLUX</h1>
+        <p style="opacity: 0.5; margin-bottom: 25px; font-size: 0.9rem;">Будущее общение здесь!</p>
+        <input type="text" id="ln" placeholder="Никнейм">
+        <input type="password" id="lp" placeholder="Пароль">
+        <button class="tap" onclick="login()">Войти</button>
+    </div>
 </div>
 
 <div id="sidebar">
     <div class="nav-btn tap" onclick="switchChat('community')">🏠</div>
     <div class="nav-btn tap" onclick="toggleMenu()">+</div>
-    
     <div id="plus-menu">
-        <div class="menu-item tap" onclick="createCh()">📢 Создать канал</div>
-        <div class="menu-item tap" onclick="findUs()">👤 Найти человека (ЛС)</div>
+        <div class="menu-item tap" onclick="createCh()">📢 Канал</div>
+        <div class="menu-item tap" onclick="findUs()">👤 Личка</div>
     </div>
 </div>
 
 <div id="chat-area">
-    <div class="header">
-        <b id="c-title"># Flux Community</b>
-    </div>
+    <div class="header"><b id="c-title"># Community</b></div>
     <div id="msgs"></div>
     <div class="input-box">
         <input type="text" id="mt" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
-        <button class="tap" onclick="send()" style="background: var(--blue); border: none; width: 50px; height: 50px; border-radius: 15px; color: white; font-size: 20px;">→</button>
+        <button class="tap" onclick="send()" style="background: var(--blue); width: 45px; height: 45px; border-radius: 12px; color: white;">→</button>
     </div>
 </div>
 
@@ -91,7 +94,7 @@
             me = d.user;
             document.getElementById('auth').style.display = 'none';
             socket.emit('join', { chat_id: 'community' });
-        } else alert("Ошибка входа!");
+        } else alert("Неверный пароль!");
     }
 
     function toggleMenu() {
@@ -101,13 +104,13 @@
 
     function createCh() {
         toggleMenu();
-        const name = prompt("Введите название канала:");
+        const name = prompt("Название канала:");
         if(name) socket.emit('create_channel', { name: name, owner: me.nick });
     }
 
     function findUs() {
         toggleMenu();
-        const who = prompt("Ник пользователя для ЛС:");
+        const who = prompt("Ник пользователя:");
         if(who) socket.emit('search_user', { nick: who, my_nick: me.nick });
     }
 
@@ -124,25 +127,18 @@
         t.value = '';
     }
 
-    socket.on('broadcast_msg', m => {
-        if(m.chat_id !== activeChat) return;
-        renderMsg(m);
-    });
-
-    socket.on('history', data => {
-        document.getElementById('msgs').innerHTML = '';
-        data.forEach(renderMsg);
-    });
+    socket.on('broadcast_msg', m => { if(m.chat_id === activeChat) renderMsg(m); });
+    socket.on('history', data => { document.getElementById('msgs').innerHTML = ''; data.forEach(renderMsg); });
 
     function renderMsg(m) {
         const isS = m.sender === me.nick;
         const v = m.is_v ? '<div class="v-badge"></div>' : '';
         const html = `
-            <div style="align-self: ${isS ? 'flex-end' : 'flex-start'}; max-width: 80%;">
-                <div style="font-size: 11px; opacity: 0.5; margin-bottom: 4px; text-align: ${isS ? 'right' : 'left'}">
+            <div style="align-self: ${isS ? 'flex-end' : 'flex-start'}; max-width: 85%;">
+                <div style="font-size: 10px; opacity: 0.5; margin-bottom: 2px; text-align: ${isS ? 'right' : 'left'}">
                     ${m.sender}${v} • ${m.time}
                 </div>
-                <div style="background: ${isS ? 'var(--blue)' : 'var(--glass)'}; padding: 12px 16px; border-radius: 18px; border-top-${isS?'right':'left'}-radius: 4px;">
+                <div style="background: ${isS ? 'var(--blue)' : 'var(--glass)'}; padding: 10px 14px; border-radius: 15px; border-top-${isS?'right':'left'}-radius: 4px; font-size: 15px;">
                     ${m.text}
                 </div>
             </div>`;
@@ -151,12 +147,7 @@
         ms.scrollTop = ms.scrollHeight;
     }
 
-    // Закрыть меню при клике вне его
-    window.onclick = function(event) {
-        if (!event.target.closest('.nav-btn')) {
-            document.getElementById('plus-menu').style.display = 'none';
-        }
-    }
+    window.onclick = e => { if (!e.target.closest('.nav-btn')) document.getElementById('plus-menu').style.display = 'none'; }
 </script>
 </body>
 </html>

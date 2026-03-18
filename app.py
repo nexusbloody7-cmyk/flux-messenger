@@ -1,5 +1,6 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch() # Должно быть строго ПЕРВОЙ строкой
+
 import sqlite3, os, uuid
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, emit, join_room
@@ -7,6 +8,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
 app = Flask(__name__)
+# Включаем логгирование только ошибок, чтобы не засорять консоль
+app.config['SECRET_KEY'] = 'flux_v3_2026'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 def get_db():
@@ -21,7 +24,7 @@ def init_db():
     cur.execute('CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT)')
     cur.execute('CREATE TABLE IF NOT EXISTS messages (chat_id TEXT, sender TEXT, text TEXT, time TEXT, is_verified INTEGER)')
     
-    # Твой аккаунт (bloody) с синей галочкой
+    # Твой аккаунт
     pw = generate_password_hash('Zavoz7152')
     cur.execute("INSERT OR REPLACE INTO users VALUES ('bloody', ?, 'https://img.icons8.com/fluency/96/user-male-circle.png', 1)", (pw,))
     
@@ -40,9 +43,10 @@ def auth():
     d = request.json
     conn = get_db()
     user = conn.execute('SELECT * FROM users WHERE nick = ?', (d['nick'],)).fetchone()
+    conn.close()
     if user and check_password_hash(user['password'], d['password']):
         return jsonify({"status": "ok", "user": dict(user)})
-    return jsonify({"status": "error"})
+    return jsonify({"status": "error", "message": "Неверные данные"})
 
 @socketio.on('search_user')
 def search_user(data):
