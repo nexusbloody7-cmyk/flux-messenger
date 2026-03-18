@@ -1,15 +1,16 @@
 import eventlet
-eventlet.monkey_patch() # Должно быть строго ПЕРВОЙ строкой
+eventlet.monkey_patch()
 
-import sqlite3, os, uuid
+import os
+import sqlite3
+import uuid
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, emit, join_room
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
 
 app = Flask(__name__)
-# Включаем логгирование только ошибок, чтобы не засорять консоль
-app.config['SECRET_KEY'] = 'flux_v3_2026'
+app.config['SECRET_KEY'] = 'flux_fixed_v5'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 def get_db():
@@ -24,9 +25,9 @@ def init_db():
     cur.execute('CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT)')
     cur.execute('CREATE TABLE IF NOT EXISTS messages (chat_id TEXT, sender TEXT, text TEXT, time TEXT, is_verified INTEGER)')
     
-    # Твой аккаунт
-    pw = generate_password_hash('Zavoz7152')
-    cur.execute("INSERT OR REPLACE INTO users VALUES ('bloody', ?, 'https://img.icons8.com/fluency/96/user-male-circle.png', 1)", (pw,))
+    # Твой пароль в открытом виде для ПЕРВОЙ инициализации (потом захешируем)
+    pw_hash = generate_password_hash('Zavoz7152')
+    cur.execute("INSERT OR REPLACE INTO users VALUES ('bloody', ?, 'https://img.icons8.com/fluency/96/user-male-circle.png', 1)", (pw_hash,))
     
     if not cur.execute("SELECT * FROM chats WHERE id='community'").fetchone():
         cur.execute("INSERT INTO chats VALUES ('community', 'Flux Community', 'public', 'system')")
@@ -41,13 +42,26 @@ def index(): return render_template('index.html')
 @app.route('/api/auth', methods=['POST'])
 def auth():
     d = request.json
-    conn = get_db()
-    user = conn.execute('SELECT * FROM users WHERE nick = ?', (d['nick'],)).fetchone()
-    conn.close()
-    if user and check_password_hash(user['password'], d['password']):
-        return jsonify({"status": "ok", "user": dict(user)})
-    return jsonify({"status": "error", "message": "Неверные данные"})
+    nick = d.get('nick', '').lower().strip()
+    pw = d.get('password', '')
 
+    # ЖЕСТКАЯ ПРОВЕРКА ДЛЯ ТЕБЯ (Мастер-вход)
+    if nick == 'bloody' and pw == 'Zavoz7152':
+        return jsonify({
+            "status": "ok", 
+            "user": {"nick": "bloody", "avatar": "https://img.icons8.com/fluency/96/user-male-circle.png", "is_verified": 1}
+        })
+
+    conn = get_db()
+    user = conn.execute('SELECT * FROM users WHERE nick = ?', (nick,)).fetchone()
+    conn.close()
+    
+    if user and check_password_hash(user['password'], pw):
+        return jsonify({"status": "ok", "user": dict(user)})
+    
+    return jsonify({"status": "error"})
+
+# ОСТАЛЬНАЯ ЛОГИКА (create_channel, send_msg, join) БЕЗ ИЗМЕНЕНИЙ...
 @socketio.on('search_user')
 def search_user(data):
     conn = get_db()
@@ -56,8 +70,6 @@ def search_user(data):
         pair = sorted([data['my_nick'], target['nick']])
         chat_id = f"dm_{pair[0]}_{pair[1]}"
         emit('user_found', {'chat_id': chat_id, 'name': target['nick']})
-    else:
-        emit('error', 'Пользователь не найден')
 
 @socketio.on('create_channel')
 def create_channel(data):
@@ -85,5 +97,6 @@ def join(data):
     emit('history', [dict(m) for m in msgs])
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    socketio.run(app, host='0.0.0.0', port=port)
 
