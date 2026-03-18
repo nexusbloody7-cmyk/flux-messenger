@@ -3,117 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flux Messenger | Liquid Glass</title>
+    <title>Flux Messenger</title>
     <style>
         :root {
-            --bg-color: #050a18; /* Тот самый глубокий темно-синий */
-            --glass-bg: rgba(255, 255, 255, 0.05);
-            --glass-border: rgba(255, 255, 255, 0.1);
-            --accent-blue: #007aff;
+            --dark-blue: #020617;
+            --liquid-glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+            --accent: #3b82f6;
         }
-
         body {
-            background-color: var(--bg-color);
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(0, 122, 255, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(0, 122, 255, 0.1) 0px, transparent 50%);
-            height: 100vh;
+            background: var(--dark-blue);
+            color: white;
+            font-family: 'Inter', sans-serif;
             margin: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: 'Inter', -apple-system, sans-serif;
-            color: white;
+            height: 100vh;
             overflow: hidden;
         }
-
-        /* Эффект жидкого стекла */
-        .flux-container {
-            background: var(--glass-bg);
-            backdrop-filter: blur(25px) saturate(180%);
-            -webkit-backdrop-filter: blur(25px) saturate(180%);
-            border: 1px solid var(--glass-border);
-            border-radius: 30px;
+        /* Жидкое стекло */
+        .glass-card {
+            background: var(--liquid-glass);
+            backdrop-filter: blur(40px) saturate(150%);
+            border: 1px solid var(--border);
+            border-radius: 35px;
             padding: 40px;
-            width: 85%;
-            max-width: 400px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            text-align: center;
+            width: 350px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
             position: relative;
         }
-
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 800;
-            margin-bottom: 10px;
-            background: linear-gradient(to bottom, #fff, #888);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: -1px;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background: #00ff88;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 5px;
-            box-shadow: 0 0 10px #00ff88;
-        }
-
-        .input-group {
-            margin-top: 30px;
-        }
-
+        h1 { font-size: 2rem; font-weight: 900; letter-spacing: -1px; margin-top: 0; }
         input {
             width: 100%;
             padding: 15px;
-            margin-bottom: 15px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--glass-border);
+            margin: 10px 0;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
             border-radius: 15px;
             color: white;
-            outline: none;
             box-sizing: border-box;
-            transition: 0.3s;
         }
-
-        input:focus {
-            border-color: var(--accent-blue);
-            background: rgba(255, 255, 255, 0.07);
-        }
-
-        .login-btn {
+        .btn {
             width: 100%;
             padding: 15px;
-            background: var(--accent-blue);
+            background: var(--accent);
             border: none;
             border-radius: 15px;
             color: white;
-            font-weight: 600;
+            font-weight: bold;
             cursor: pointer;
-            transition: 0.3s;
-            box-shadow: 0 10px 20px -5px rgba(0, 122, 255, 0.4);
+            margin-top: 20px;
         }
-
-        .login-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 25px -5px rgba(0, 122, 255, 0.5);
+        .verified-badge {
+            color: #3b82f6;
+            margin-left: 5px;
+            font-size: 1.2rem;
+        }
+        .search-results {
+            margin-top: 15px;
+            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
-    <div class="flux-container">
+    <div class="glass-card">
         <h1>FLUX</h1>
-        <p style="opacity: 0.6; font-size: 0.9rem;"><span class="status-dot"></span> Система активна</p>
-        
-        <div class="input-group">
-            <input type="text" placeholder="Никнейм">
-            <input type="password" placeholder="Пароль">
-            <button class="login-btn">Войти в сеть</button>
+        <div id="auth-ui">
+            <input type="email" id="email" placeholder="Email">
+            <input type="text" id="nick" placeholder="Никнейм">
+            <input type="password" id="pass" placeholder="Пароль">
+            <button class="btn" onclick="register()">Создать аккаунт</button>
         </div>
+        
+        <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px;">
+            <input type="text" id="search" placeholder="Поиск по нику..." oninput="searchUser()">
+            <div id="results" class="search-results"></div>
+        </div>
+        
+        <p style="margin-top: 20px; opacity: 0.5;">Основатель: bloody <span class="verified-badge">✔</span></p>
     </div>
+
+    <script>
+        async function register() {
+            const nick = document.getElementById('nick').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('pass').value;
+            const res = await fetch('/register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ nick, email, password })
+            });
+            const data = await res.json();
+            alert(data.status === 'ok' ? 'Успех!' : data.message);
+        }
+
+        async function searchUser() {
+            const q = document.getElementById('search').value;
+            if(q.length < 2) return;
+            const res = await fetch('/search_user?q=' + q);
+            const users = await res.json();
+            document.getElementById('results').innerHTML = users.map(u => 
+                `<div>${u.nick} ${u.is_admin ? '<span class="verified-badge">✔</span>' : ''}</div>`
+            ).join('');
+        }
+    </script>
 </body>
 </html>
 
