@@ -1,48 +1,302 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flux Fixed</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Flux Mobile Ultra</title>
+    <script src="https://cdn.socketio.io/4.7.2/socketio.min.js"></script>
     <style>
-        body { background: #010409; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: rgba(255,255,255,0.03); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 25px; padding: 30px; width: 280px; text-align: center; }
-        input { width: 100%; padding: 12px; margin: 10px 0; background: #000; border: 1px solid #333; border-radius: 10px; color: #fff; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #007aff; border: none; border-radius: 10px; color: #fff; font-weight: bold; cursor: pointer; }
+        :root {
+            --deep-navy: #010206;
+            --liquid-glass: rgba(255, 255, 255, 0.015);
+            --border: rgba(255, 255, 255, 0.05);
+            --accent: #007aff;
+            --verified: #007aff;
+            --iphone-bottom: env(safe-area-inset-bottom);
+        }
+
+        body {
+            background-color: var(--deep-navy);
+            background-image: radial-gradient(at 0% 0%, rgba(0, 122, 255, 0.07) 0px, transparent 50%);
+            color: white; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0; height: 100vh; overflow: hidden;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        /* --- Вход / Регистрация (Mobile Liquid Glass) --- */
+        #auth-ui {
+            background: var(--liquid-glass);
+            backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+            border: 1px solid var(--border); border-radius: 35px;
+            padding: 40px 30px; width: 85%; max-width: 360px; text-align: center;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.6);
+            transition: 0.5s ease; z-index: 100;
+        }
+        .auth-header h1 { font-size: 3rem; font-weight: 900; letter-spacing: -2px; margin: 0; background: linear-gradient(#fff, #999); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .auth-header p { opacity: 0.5; font-size: 0.9rem; margin-top: 3px; margin-bottom: 25px; }
+
+        .auth-tabs { display: flex; gap: 8px; background: rgba(0,0,0,0.2); padding: 5px; border-radius: 14px; margin-bottom: 20px; }
+        .tab-btn { flex: 1; padding: 10px; background: transparent; border: none; color: white; border-radius: 10px; cursor: pointer; transition: 0.3s; opacity: 0.5; font-weight: 600; font-size: 0.9rem;}
+        .tab-btn.active { background: var(--accent); opacity: 1; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+
+        .input-group input { width: 100%; padding: 16px; margin-bottom: 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 14px; color: white; box-sizing: border-box; font-size: 1rem; -webkit-appearance: none;}
+        .input-group input:focus { border-color: var(--accent); outline: none; background: rgba(0,0,0,0.5); }
+
+        .action-btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 14px; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; transition: 0.3s; box-shadow: 0 10px 20px rgba(0, 122, 255, 0.2); margin-top: 10px; }
+        .action-btn:active { transform: scale(0.98); opacity: 0.9; }
+
+        /* --- Основной мобильный интерфейс чата --- */
+        #main-ui { display: none; width: 100vw; height: 100vh; flex-direction: column; position: fixed; inset: 0;}
+        
+        /* Хедер чата */
+        .chat-header { height: 60px; padding: 0 15px; background: rgba(1, 2, 6, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; position: fixed; top: 0; width: 100%; z-index: 10; box-sizing: border-box; padding-top: env(safe-area-inset-top);}
+        .chat-title { font-weight: 800; font-size: 1.1rem; letter-spacing: -0.5px;}
+        
+        /* Область сообщений */
+        .messages-container { flex: 1; overflow-y: auto; padding: calc(70px + env(safe-area-inset-top)) 15px calc(80px + var(--iphone-bottom)); display: flex; flex-direction: column; gap: 12px; background: radial-gradient(at 50% 100%, rgba(0, 122, 255, 0.04), transparent 70%);}
+        
+        /* Сообщение */
+        .msg-block { display: flex; gap: 10px; align-items: flex-start; max-width: 85%; }
+        .msg-block.self { flex-direction: row-reverse; align-self: flex-end; max-width: 80%; }
+
+        .avatar { width: 34px; height: 34px; border-radius: 50%; background: #111; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border);}
+        
+        .msg-bubble { background: var(--liquid-glass); border: 1px solid var(--border); padding: 10px 14px; border-radius: 16px; border-top-left-radius: 4px; position: relative; backdrop-filter: blur(10px); }
+        .msg-block.self .msg-bubble { background: var(--accent); border: none; border-top-left-radius: 16px; border-top-right-radius: 4px; box-shadow: 0 4px 10px rgba(0,122,255,0.15); }
+        
+        .msg-info { font-size: 0.75rem; opacity: 0.6; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;}
+        .msg-info b { opacity: 1; color: #fff; }
+        .msg-text { font-size: 0.95rem; line-height: 1.4; color: rgba(255,255,255,0.95); word-wrap: break-word; }
+        .msg-block.self .msg-text { color: #fff; }
+        .msg-time { font-size: 0.65rem; opacity: 0.5; margin-top: 4px; text-align: right; }
+        .msg-block.self .msg-time { color: rgba(255,255,255,0.7); }
+
+        /* Галочка Основателя (синяя) */
+        .verified-badge { color: #fff; background: var(--verified); border-radius: 50%; font-size: 0.6rem; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; flex-shrink: 0; position: relative; top: -1px;}
+
+        /* Реакции под сообщением */
+        .reactions-bar { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+        .react-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 10px; padding: 3px 6px; font-size: 0.8rem; cursor: pointer; transition: 0.2s; color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 3px;}
+        .react-btn.active { background: rgba(0, 122, 255, 0.2); border-color: var(--accent); color: #fff; }
+        .react-count { font-size: 0.75rem; font-weight: 600; }
+
+        /* Панель ввода сообщений (Mobile) */
+        .input-bar { position: fixed; bottom: 0; width: 100%; background: rgba(1, 2, 6, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--border); padding: 10px 10px calc(10px + var(--iphone-bottom)); display: flex; gap: 8px; align-items: center; box-sizing: border-box; z-index: 10;}
+        .input-bar input { flex: 1; margin: 0; padding: 12px 15px; border-radius: 22px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: white; font-size: 1rem; -webkit-appearance: none;}
+        .input-bar input:focus { outline: none; border-color: var(--accent); }
+        .send-btn { background: var(--accent); border: none; color: white; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,122,255,0.3); transition: 0.2s;}
+        .send-btn:active { transform: scale(0.9); opacity: 0.8; }
+
     </style>
 </head>
 <body>
-    <div class="card" id="ui">
-        <h1>FLUX</h1>
-        <input type="text" id="n" placeholder="Никнейм">
-        <input type="password" id="p" placeholder="Пароль">
-        <button id="btn" onclick="login()">Войти во Flux</button>
+
+    <div id="auth-ui">
+        <div class="auth-header">
+            <h1>FLUX</h1>
+            <p>Будущее общение здесь!</p>
+        </div>
+
+        <div class="auth-tabs">
+            <button class="tab-btn active" id="tab-login" onclick="setAuthMode('login')">Вход</button>
+            <button class="tab-btn" id="tab-register" onclick="setAuthMode('register')">Регистрация</button>
+        </div>
+
+        <div class="input-group">
+            <input type="email" id="email" placeholder="Email (для регистрации)" style="display:none;">
+            <input type="text" id="nick" placeholder="Никнейм" autocorrect="off" autocapitalize="off">
+            <input type="password" id="pass" placeholder="Пароль">
+            <button class="action-btn" id="auth-btn" onclick="handleAuth()">Войти в сеть</button>
+        </div>
+    </div>
+
+    <div id="main-ui">
+        <div class="chat-header">
+            <div class="chat-title"># Flux Community</div>
+            <img src="" class="avatar" id="my-avatar" style="width:32px; height:32px; border: 2px solid var(--accent);">
+        </div>
+
+        <div class="messages-container" id="msgs">
+            </div>
+
+        <div class="input-bar">
+            <input type="text" id="msg-input" placeholder="Сообщение..." onkeypress="handleKeyPress(event)">
+            <button class="send-btn" onclick="sendMsg()">🚀</button>
+        </div>
     </div>
 
     <script>
-        async function login() {
-            const nick = document.getElementById('n').value;
-            const pass = document.getElementById('p').value;
-            const btn = document.getElementById('btn');
-            
-            btn.innerText = "Вход...";
+        const socket = io();
+        let currentUser = null;
+        let activeChat = 'community';
+        let authMode = 'login';
+
+        // Переключение Вход/Регистрация
+        function setAuthMode(mode) {
+            authMode = mode;
+            document.getElementById('email').style.display = mode === 'register' ? 'block' : 'none';
+            document.getElementById('auth-btn').innerText = mode === 'register' ? 'Создать Premium аккаунт' : 'Войти в сеть';
+            document.getElementById('tab-login').classList.toggle('active', mode === 'login');
+            document.getElementById('tab-register').classList.toggle('active', mode === 'register');
+        }
+
+        // Логика Аuth
+        async function handleAuth() {
+            const nick = document.getElementById('nick').value.trim();
+            const pass = document.getElementById('pass').value.trim();
+            const email = document.getElementById('email').value.trim();
+
+            if(!nick || !pass || (authMode === 'register' && !email)) return alert('Заполни все поля!');
+
             try {
                 const res = await fetch('/api/auth', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action: 'login', nick: nick, password: pass })
+                    body: JSON.stringify({ action: authMode, nick, password: pass, email })
                 });
                 const data = await res.json();
+
                 if(data.status === 'ok') {
-                    document.getElementById('ui').innerHTML = `<h2>Привет, ${data.user.nick} ✔</h2><p>Система запущена!</p>`;
-                } else {
-                    alert('Ошибка: ' + data.message);
-                    btn.innerText = "Войти во Flux";
-                }
-            } catch(e) {
-                alert('Ошибка сервера. Проверь логи Render!');
-                btn.innerText = "Войти во Flux";
-            }
+                    if(authMode === 'register') {
+                        alert('Premium аккаунт создан! Теперь войдите.');
+                        setAuthMode('login');
+                    } else {
+                        currentUser = data.user;
+                        startApp();
+                    }
+                } else alert(data.message);
+            } catch(e) { alert('Ошибка соединения с сервером'); }
         }
+
+        // Запуск основного интерфейса
+        function startApp() {
+            document.getElementById('auth-ui').style.display = 'none';
+            document.getElementById('main-ui').style.display = 'flex';
+            document.getElementById('my-avatar').src = currentUser.avatar;
+            
+            // Кнопка входа: bloody / Zavoz7152
+            
+            socket.emit('join_chat', { chat_id: activeChat });
+        }
+
+        // Отправка сообщения
+        function sendMsg() {
+            const input = document.getElementById('msg-input');
+            if(!input.value.trim()) return;
+            
+            socket.emit('new_msg', {
+                chat_id: activeChat,
+                sender: currentUser.nick,
+                sender_av: currentUser.avatar,
+                text: input.value,
+                is_admin: currentUser.is_admin
+            });
+            input.value = '';
+            input.focus();
+        }
+
+        function handleKeyPress(e) { if(e.key === 'Enter') sendMsg(); }
+
+        // Добавление реакции
+        function addReaction(msgId, emoji) {
+            socket.emit('add_reaction', {
+                msg_id: msgId,
+                user: currentUser.nick,
+                emoji: emoji,
+                chat_id: activeChat
+            });
+        }
+
+        // --- Socket.IO события ---
+
+        // Загрузка истории
+        socket.on('load_msgs', (msgs) => {
+            const container = document.getElementById('msgs');
+            container.innerHTML = '';
+            msgs.forEach(renderMsg);
+            scrollBottom();
+        });
+
+        // Получение нового сообщения
+        socket.on('msg_broadcast', (msg) => {
+            if(msg.chat_id === activeChat) {
+                renderMsg(msg);
+                scrollBottom();
+            }
+        });
+
+        // Обновление реакций в реальном времени
+        socket.on('update_reactions', (data) => {
+            const msgBubble = document.querySelector(`[data-msg-id="${data.msg_id}"]`);
+            if(msgBubble) {
+                renderReactionsBar(msgBubble, data.msg_id, JSON.parse(data.reactions));
+            }
+        });
+
+        // --- Отрисовка UI ---
+
+        function renderMsg(msg) {
+            const container = document.getElementById('msgs');
+            const isSelf = msg.sender === currentUser.nick;
+            // Проверка на основателя bloody (галочка берется из БД статуса, но тут для скорости)
+            const verifiedHtml = msg.sender === 'bloody' ? '<span class="verified-badge">✔</span>' : '';
+            
+            const html = `
+                <div class="msg-block ${isSelf ? 'self' : ''}">
+                    <img src="${msg.sender_av}" class="avatar" onerror="this.src='https://api.dicebear.com/8.x/shapes/svg?seed=${msg.sender}'">
+                    <div class="msg-bubble" data-msg-id="${msg.id}">
+                        ${isSelf ? '' : `<div class="msg-info"><b>${msg.sender}</b>${verifiedHtml}</div>`}
+                        <div class="msg-text">${msg.text}</div>
+                        <div class="msg-time">${msg.time}</div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+            
+            // Отрисовываем реакции для этого сообщения
+            const currentBubble = container.querySelector(`[data-msg-id="${msg.id}"]`);
+            renderReactionsBar(currentBubble, msg.id, JSON.parse(msg.reactions));
+        }
+
+        function renderReactionsBar(bubbleObj, msgId, reactions) {
+            // Удаляем старый бар, если есть
+            const oldBar = bubbleObj.querySelector('.reactions-bar');
+            if(oldBar) oldBar.remove();
+
+            const bar = document.createElement('div');
+            bar.className = 'reactions-bar';
+            
+            // Базовые эмодзи для добавления
+            const quickEmojis = ['🔥', '❤️', '😂', '👍'];
+            let barHtml = '';
+
+            // Показывать уже поставленные реакции
+            for (const [emoji, users] of Object.entries(reactions)) {
+                const isActive = users.includes(currentUser.nick);
+                barHtml += `
+                    <div class="react-btn ${isActive ? 'active' : ''}" onclick="addReaction(${msgId}, '${emoji}')">
+                        ${emoji} <span class="react-count">${users.length}</span>
+                    </div>
+                `;
+            }
+
+            // Кнопка "+" для добавления дефолтного 🔥 если реакций нет
+            if(Object.keys(reactions).length === 0) {
+                 barHtml = `<div class="react-btn" style="opacity:0.3;" onclick="addReaction(${msgId}, '🔥')">🔥 +</div>`;
+            } else {
+                 // Кнопка для добавления ❤️ если его еще нет
+                 if(!reactions['❤️']) barHtml += `<div class="react-btn" style="opacity:0.3;" onclick="addReaction(${msgId}, '❤️')">❤️</div>`;
+            }
+
+            bar.innerHTML = barHtml;
+            bubbleObj.appendChild(bar);
+        }
+
+        function scrollBottom() {
+            const container = document.getElementById('msgs');
+            container.scrollTop = container.scrollHeight;
+        }
+
     </script>
 </body>
 </html>
