@@ -1,47 +1,121 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flux Messenger</title>
     <style>
-        body { background: #020617; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-image: radial-gradient(circle at top, #1e293b, transparent); }
-        .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 30px; padding: 40px; width: 320px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-        h1 { font-size: 2.5rem; letter-spacing: -2px; margin: 0 0 10px; }
-        input { width: 100%; padding: 12px; margin: 8px 0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: white; box-sizing: border-box; }
-        .btn { width: 100%; padding: 14px; background: #007aff; border: none; border-radius: 12px; color: white; font-weight: bold; cursor: pointer; margin-top: 15px; }
-        .verified { color: #007aff; }
+        :root { --blue: #007aff; --glass: rgba(255,255,255,0.03); --border: rgba(255,255,255,0.1); }
+        body { background: #010409; color: white; font-family: 'Inter', sans-serif; margin:0; height:100vh; overflow:hidden; }
+        .app-container { display: flex; height: 100vh; }
+        
+        /* Sidebar */
+        .sidebar { width: 300px; background: rgba(13, 17, 23, 0.8); border-right: 1px solid var(--border); backdrop-filter: blur(20px); display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .chat-item { padding: 15px; border-radius: 15px; cursor: pointer; margin-bottom: 5px; transition: 0.3s; }
+        .chat-item:hover { background: var(--glass); }
+        
+        /* Main Chat Area */
+        .main-chat { flex: 1; display: flex; flex-direction: column; background: radial-gradient(circle at center, #020617, #010409); }
+        .chat-header { padding: 15px 25px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .messages { flex: 1; padding: 25px; overflow-y: auto; }
+        .input-area { padding: 20px; background: var(--glass); display: flex; gap: 10px; }
+        
+        /* UI Elements */
+        input { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; color: white; padding: 12px; }
+        .btn { background: var(--blue); border: none; border-radius: 12px; color: white; font-weight: bold; cursor: pointer; padding: 10px 20px; }
+        .verified { color: var(--blue); margin-left: 5px; }
+
+        /* Auth Overlay */
+        #auth-overlay { position: fixed; inset: 0; background: #010409; display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .glass-card { background: var(--glass); backdrop-filter: blur(40px); border: 1px solid var(--border); border-radius: 30px; padding: 40px; width: 320px; text-align: center; }
     </style>
 </head>
 <body>
-    <div class="glass" id="box">
+
+<div id="auth-overlay">
+    <div class="glass-card">
         <h1>FLUX</h1>
-        <p style="opacity:0.5; font-size:0.8rem;">Будущее общение здесь!</p>
-        <div id="inputs">
-            <input type="email" id="e" placeholder="Email (для регистрации)">
-            <input type="text" id="n" placeholder="Никнейм">
-            <input type="password" id="p" placeholder="Пароль">
-            <button class="btn" onclick="send('register')">Создать аккаунт</button>
-            <button class="btn" style="background:transparent; border:1px solid #007aff;" onclick="send('login')">Войти</button>
+        <p style="opacity:0.5; margin-bottom:20px;">Будущее общение здесь!</p>
+        <input type="text" id="login-nick" placeholder="Никнейм" style="width:100%; margin-bottom:10px;">
+        <input type="password" id="login-pass" placeholder="Пароль" style="width:100%; margin-bottom:20px;">
+        <button class="btn" style="width:100%" onclick="login()">Войти во Flux</button>
+    </div>
+</div>
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h3>Чаты <button onclick="createChat()" style="float:right; background:none; border:none; color:var(--blue); cursor:pointer;">+</button></h3>
+            <input type="text" id="search-input" placeholder="Поиск людей..." oninput="searchUsers()" style="width:100%; margin-top:10px;">
+            <div id="search-results" style="background: #0d1117; position: absolute; width: 260px; z-index: 10;"></div>
+        </div>
+        <div class="chat-list" id="chat-list">
+            </div>
+    </div>
+    <div class="main-chat">
+        <div class="chat-header">
+            <h2 id="current-chat-name">Flux Community</h2>
+            <div id="user-info"></div>
+        </div>
+        <div class="messages" id="messages-box">
+            <div style="opacity:0.5; text-align:center;">Добро пожаловать в общий чат Flux Community!</div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="msg-input" placeholder="Сообщение..." style="flex:1">
+            <button class="btn">🚀</button>
         </div>
     </div>
-    <script>
-        async function send(action) {
-            const nick = document.getElementById('n').value;
-            const pass = document.getElementById('p').value;
-            const email = document.getElementById('e').value;
-            const res = await fetch('/api/auth', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action, nick, password: pass, email })
-            });
-            const data = await res.json();
-            if(data.status === 'ok') {
-                if(action === 'login') {
-                    document.getElementById('box').innerHTML = `<h1>Привет, ${data.user.nick}${data.user.is_admin ? '<span class="verified">✔</span>' : ''}</h1><p>Вы в сети Flux Community</p>`;
-                } else alert('Успешно! Теперь нажми Войти');
-            } else alert(data.message);
-        }
-    </script>
+</div>
+
+<script>
+    let currentUser = null;
+
+    async function login() {
+        const nick = document.getElementById('login-nick').value;
+        const pass = document.getElementById('login-pass').value;
+        const res = await fetch('/api/auth', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'login', nick: nick, password: pass })
+        });
+        const data = await res.json();
+        if(data.status === 'ok') {
+            currentUser = data.user;
+            document.getElementById('auth-overlay').style.display = 'none';
+            document.getElementById('user-info').innerHTML = `${currentUser.nick} ${currentUser.is_admin ? '<span class="verified">✔</span>' : ''}`;
+            loadChats();
+        } else { alert('Неверные данные!'); }
+    }
+
+    async function loadChats() {
+        const res = await fetch('/api/chats');
+        const chats = await res.json();
+        const list = document.getElementById('chat-list');
+        list.innerHTML = chats.map(c => `<div class="chat-item" onclick="selectChat('${c.name}')"># ${c.name}</div>`).join('');
+    }
+
+    async function searchUsers() {
+        const q = document.getElementById('search-input').value;
+        if(q.length < 2) { document.getElementById('search-results').innerHTML = ''; return; }
+        const res = await fetch('/api/search?q=' + q);
+        const users = await res.json();
+        document.getElementById('search-results').innerHTML = users.map(u => 
+            `<div style="padding:10px; border-bottom:1px solid var(--border);">${u.nick} ${u.is_admin ? '✔' : ''}</div>`
+        ).join('');
+    }
+
+    async function createChat() {
+        const name = prompt("Введите название канала:");
+        if(!name) return;
+        await fetch('/api/create_chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: name, type: 'channel', owner: currentUser.nick })
+        });
+        loadChats();
+    }
+</script>
 </body>
 </html>
 
