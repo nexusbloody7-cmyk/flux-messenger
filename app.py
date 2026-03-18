@@ -1,13 +1,8 @@
-import os
-import sqlite3
-from datetime import datetime
+import os, sqlite3, uuid
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO, emit, join_room
+from datetime import datetime
 
-# Инициализация без лишних наворотов
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'flux_final_safety'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 def init_db():
     conn = sqlite3.connect('flux.db')
@@ -31,25 +26,23 @@ def auth():
         return jsonify({"status": "ok", "user": {"nick": "bloody", "is_verified": 1}})
     return jsonify({"status": "error"})
 
-@socketio.on('join')
-def on_join(data):
-    join_room(data['chat_id'])
+@app.route('/api/messages', methods=['GET', 'POST'])
+def handle_msgs():
     conn = sqlite3.connect('flux.db')
     conn.row_factory = sqlite3.Row
-    msgs = [dict(m) for m in conn.execute('SELECT * FROM messages WHERE chat_id = ?', (data['chat_id'],)).fetchall()]
+    if request.method == 'POST':
+        d = request.json
+        t = datetime.now().strftime('%H:%M')
+        is_v = 1 if d['sender'] == 'bloody' else 0
+        conn.execute('INSERT INTO messages VALUES (?, ?, ?, ?, ?)', ('community', d['sender'], d['text'], t, is_v))
+        conn.commit()
+    
+    msgs = [dict(m) for m in conn.execute('SELECT * FROM messages ORDER BY rowid ASC').fetchall()]
     conn.close()
-    emit('history', msgs)
-
-@socketio.on('send_msg')
-def handle_msg(data):
-    t, is_v = datetime.now().strftime('%H:%M'), (1 if data['sender'] == 'bloody' else 0)
-    conn = sqlite3.connect('flux.db')
-    conn.execute('INSERT INTO messages VALUES (?, ?, ?, ?, ?)', (data['chat_id'], data['sender'], data['text'], t, is_v))
-    conn.commit()
-    conn.close()
-    emit('broadcast_msg', {'chat_id': data['chat_id'], 'sender': data['sender'], 'text': data['text'], 'time': t, 'is_v': is_v}, room=data['chat_id'])
+    return jsonify(msgs)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
-    socketio.run(app, host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)
+
 
