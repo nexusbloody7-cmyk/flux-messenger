@@ -1,303 +1,255 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Flux Mobile Ultra</title>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Flux Ultra</title>
     <script src="https://cdn.socketio.io/4.7.2/socketio.min.js"></script>
     <style>
-        :root {
-            --deep-navy: #010206;
-            --liquid-glass: rgba(255, 255, 255, 0.015);
-            --border: rgba(255, 255, 255, 0.05);
-            --accent: #007aff;
-            --verified: #007aff;
-            --iphone-bottom: env(safe-area-inset-bottom);
-        }
-
-        body {
-            background-color: var(--deep-navy);
-            background-image: radial-gradient(at 0% 0%, rgba(0, 122, 255, 0.07) 0px, transparent 50%);
-            color: white; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            margin: 0; height: 100vh; overflow: hidden;
-            display: flex; justify-content: center; align-items: center;
-        }
-
-        /* --- Вход / Регистрация (Mobile Liquid Glass) --- */
-        #auth-ui {
-            background: var(--liquid-glass);
-            backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
-            border: 1px solid var(--border); border-radius: 35px;
-            padding: 40px 30px; width: 85%; max-width: 360px; text-align: center;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.6);
-            transition: 0.5s ease; z-index: 100;
-        }
-        .auth-header h1 { font-size: 3rem; font-weight: 900; letter-spacing: -2px; margin: 0; background: linear-gradient(#fff, #999); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .auth-header p { opacity: 0.5; font-size: 0.9rem; margin-top: 3px; margin-bottom: 25px; }
-
-        .auth-tabs { display: flex; gap: 8px; background: rgba(0,0,0,0.2); padding: 5px; border-radius: 14px; margin-bottom: 20px; }
-        .tab-btn { flex: 1; padding: 10px; background: transparent; border: none; color: white; border-radius: 10px; cursor: pointer; transition: 0.3s; opacity: 0.5; font-weight: 600; font-size: 0.9rem;}
-        .tab-btn.active { background: var(--accent); opacity: 1; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-
-        .input-group input { width: 100%; padding: 16px; margin-bottom: 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 14px; color: white; box-sizing: border-box; font-size: 1rem; -webkit-appearance: none;}
-        .input-group input:focus { border-color: var(--accent); outline: none; background: rgba(0,0,0,0.5); }
-
-        .action-btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 14px; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; transition: 0.3s; box-shadow: 0 10px 20px rgba(0, 122, 255, 0.2); margin-top: 10px; }
-        .action-btn:active { transform: scale(0.98); opacity: 0.9; }
-
-        /* --- Основной мобильный интерфейс чата --- */
-        #main-ui { display: none; width: 100vw; height: 100vh; flex-direction: column; position: fixed; inset: 0;}
+        :root { --navy: #010206; --accent: #007aff; --glass: rgba(255, 255, 255, 0.02); --border: rgba(255, 255, 255, 0.06); --iphone-top: env(safe-area-inset-top); --iphone-bottom: env(safe-area-inset-bottom); }
+        body { background: var(--navy); color: white; font-family: -apple-system, sans-serif; margin: 0; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         
-        /* Хедер чата */
-        .chat-header { height: 60px; padding: 0 15px; background: rgba(1, 2, 6, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; position: fixed; top: 0; width: 100%; z-index: 10; box-sizing: border-box; padding-top: env(safe-area-inset-top);}
-        .chat-title { font-weight: 800; font-size: 1.1rem; letter-spacing: -0.5px;}
+        /* Auth */
+        #auth-ui { position: fixed; inset: 0; background: var(--navy); display: flex; align-items: center; justify-content: center; z-index: 100; transition: 0.5s; }
+        .glass-card { background: var(--glass); backdrop-filter: blur(30px); border: 1px solid var(--border); border-radius: 30px; padding: 40px 30px; width: 85%; max-width: 340px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        input { width: 100%; padding: 15px; margin-bottom: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 14px; color: white; box-sizing: border-box; font-size: 1rem; -webkit-appearance: none; }
+        .btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 14px; color: white; font-weight: bold; cursor: pointer; font-size: 1rem; }
+
+        /* Main App Structure */
+        #main-ui { display: none; width: 100vw; height: 100vh; flex-direction: row; position: fixed; inset: 0; }
         
-        /* Область сообщений */
-        .messages-container { flex: 1; overflow-y: auto; padding: calc(70px + env(safe-area-inset-top)) 15px calc(80px + var(--iphone-bottom)); display: flex; flex-direction: column; gap: 12px; background: radial-gradient(at 50% 100%, rgba(0, 122, 255, 0.04), transparent 70%);}
+        /* Sidebar (Свайп слева) */
+        .sidebar { width: 280px; background: rgba(1, 2, 6, 0.9); border-right: 1px solid var(--border); backdrop-filter: blur(20px); display: flex; flex-direction: column; transform: translateX(-100%); transition: 0.3s; position: absolute; height: 100%; z-index: 20; padding-top: var(--iphone-top); }
+        .sidebar.open { transform: translateX(0); }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); text-align: center; }
+        .chat-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .chat-item { padding: 15px; border-radius: 14px; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.7); }
+        .chat-item.active { background: var(--accent); color: white; font-weight: 600; }
+        .chat-item:hover:not(.active) { background: var(--glass); }
+
+        /* Main Chat Area */
+        .main-content { flex: 1; display: flex; flex-direction: column; background: radial-gradient(at 50% 100%, rgba(0, 122, 255, 0.04), transparent 70%); }
+        .header { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 15px; justify-content: space-between; background: rgba(1, 2, 6, 0.8); backdrop-filter: blur(20px); z-index: 10; padding-top: var(--iphone-top); }
+        .messages { flex: 1; overflow-y: auto; padding: calc(75px + var(--iphone-top)) 15px 90px; display: flex; flex-direction: column; gap: 12px; }
         
-        /* Сообщение */
-        .msg-block { display: flex; gap: 10px; align-items: flex-start; max-width: 85%; }
-        .msg-block.self { flex-direction: row-reverse; align-self: flex-end; max-width: 80%; }
-
-        .avatar { width: 34px; height: 34px; border-radius: 50%; background: #111; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border);}
+        /* Input Bar */
+        .input-bar { position: fixed; bottom: 0; width: 100%; border-top: 1px solid var(--border); display: flex; align-items: center; padding: 10px 10px calc(10px + var(--iphone-bottom)); gap: 8px; background: rgba(1, 2, 6, 0.85); backdrop-filter: blur(20px); z-index: 10; box-sizing: border-box;}
+        .input-bar input { flex: 1; margin: 0; border-radius: 20px; padding: 12px 15px;}
         
-        .msg-bubble { background: var(--liquid-glass); border: 1px solid var(--border); padding: 10px 14px; border-radius: 16px; border-top-left-radius: 4px; position: relative; backdrop-filter: blur(10px); }
-        .msg-block.self .msg-bubble { background: var(--accent); border: none; border-top-left-radius: 16px; border-top-right-radius: 4px; box-shadow: 0 4px 10px rgba(0,122,255,0.15); }
-        
-        .msg-info { font-size: 0.75rem; opacity: 0.6; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;}
-        .msg-info b { opacity: 1; color: #fff; }
-        .msg-text { font-size: 0.95rem; line-height: 1.4; color: rgba(255,255,255,0.95); word-wrap: break-word; }
-        .msg-block.self .msg-text { color: #fff; }
-        .msg-time { font-size: 0.65rem; opacity: 0.5; margin-top: 4px; text-align: right; }
-        .msg-block.self .msg-time { color: rgba(255,255,255,0.7); }
+        /* UI Elements */
+        .avatar { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); object-fit: cover; }
+        .bubble { background: var(--glass); border: 1px solid var(--border); padding: 10px 14px; border-radius: 16px; border-top-left-radius: 4px; max-width: 75%; position: relative; }
+        .self .bubble { background: var(--accent); border: none; align-self: flex-end; border-top-left-radius: 16px; border-top-right-radius: 4px; }
+        .verified { color: var(--accent); margin-left: 3px; }
+        .self .verified { color: white; }
+        .msg-block { display: flex; gap: 10px; align-items: flex-start; }
+        .msg-block.self { flex-direction: row-reverse; }
 
-        /* Галочка Основателя (синяя) */
-        .verified-badge { color: #fff; background: var(--verified); border-radius: 50%; font-size: 0.6rem; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; flex-shrink: 0; position: relative; top: -1px;}
-
-        /* Реакции под сообщением */
-        .reactions-bar { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
-        .react-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 10px; padding: 3px 6px; font-size: 0.8rem; cursor: pointer; transition: 0.2s; color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 3px;}
-        .react-btn.active { background: rgba(0, 122, 255, 0.2); border-color: var(--accent); color: #fff; }
-        .react-count { font-size: 0.75rem; font-weight: 600; }
-
-        /* Панель ввода сообщений (Mobile) */
-        .input-bar { position: fixed; bottom: 0; width: 100%; background: rgba(1, 2, 6, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--border); padding: 10px 10px calc(10px + var(--iphone-bottom)); display: flex; gap: 8px; align-items: center; box-sizing: border-box; z-index: 10;}
-        .input-bar input { flex: 1; margin: 0; padding: 12px 15px; border-radius: 22px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: white; font-size: 1rem; -webkit-appearance: none;}
-        .input-bar input:focus { outline: none; border-color: var(--accent); }
-        .send-btn { background: var(--accent); border: none; color: white; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,122,255,0.3); transition: 0.2s;}
-        .send-btn:active { transform: scale(0.9); opacity: 0.8; }
-
+        /* Modal Поиска */
+        #search-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: none; z-index: 30; align-items: center; justify-content: center; }
+        .search-results { width: 80%; max-width: 300px; max-height: 300px; overflow-y: auto; background: rgba(1,2,6,0.9); border-radius: 20px; padding: 10px;}
     </style>
 </head>
 <body>
 
-    <div id="auth-ui">
-        <div class="auth-header">
-            <h1>FLUX</h1>
-            <p>Будущее общение здесь!</p>
-        </div>
-
-        <div class="auth-tabs">
-            <button class="tab-btn active" id="tab-login" onclick="setAuthMode('login')">Вход</button>
-            <button class="tab-btn" id="tab-register" onclick="setAuthMode('register')">Регистрация</button>
-        </div>
-
+<div id="auth-ui">
+    <div class="glass-card">
+        <h1 style="font-size: 3.5rem; font-weight: 900; letter-spacing: -3px; margin: 0; background: linear-gradient(#fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">FLUX</h1>
+        <p style="opacity: 0.5; margin-bottom: 25px;">Premium Mobile Network</p>
         <div class="input-group">
-            <input type="email" id="email" placeholder="Email (для регистрации)" style="display:none;">
             <input type="text" id="nick" placeholder="Никнейм" autocorrect="off" autocapitalize="off">
             <input type="password" id="pass" placeholder="Пароль">
-            <button class="action-btn" id="auth-btn" onclick="handleAuth()">Войти в сеть</button>
+            <button class="btn" onclick="login()">Войти во Flux</button>
         </div>
     </div>
+</div>
 
-    <div id="main-ui">
-        <div class="chat-header">
-            <div class="chat-title"># Flux Community</div>
-            <img src="" class="avatar" id="my-avatar" style="width:32px; height:32px; border: 2px solid var(--accent);">
+<div id="main-ui">
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <img src="" id="sidebar-av" class="avatar" style="width: 50px; height: 50px; margin-bottom: 10px; cursor: pointer;" onclick="document.getElementById('file-input').click()">
+            <div id="sidebar-nick" style="font-weight: 700;"></div>
+            <p style="opacity:0.5; font-size:0.8rem;">Основатель ✔</p>
+            <input type="file" id="file-input" style="display:none;" onchange="uploadAvatar()">
         </div>
-
-        <div class="messages-container" id="msgs">
+        <div class="chat-list" id="chat-list">
             </div>
-
-        <div class="input-bar">
-            <input type="text" id="msg-input" placeholder="Сообщение..." onkeypress="handleKeyPress(event)">
-            <button class="send-btn" onclick="sendMsg()">🚀</button>
-        </div>
+        <button class="btn" style="border-radius:0; padding:12px; font-size:0.9rem;" onclick="openSearch()">🔍 Найти человека</button>
     </div>
 
-    <script>
-        const socket = io();
-        let currentUser = null;
-        let activeChat = 'community';
-        let authMode = 'login';
+    <div class="main-content">
+        <div class="header">
+            <button style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;" onclick="toggleSidebar()">☰</button>
+            <div class="chat-title" id="chat-title"># Flux Community</div>
+            <img src="" id="header-av" class="avatar" style="width:30px; height:30px;">
+        </div>
+        <div class="messages" id="msgs"></div>
+        <div class="input-bar">
+            <input type="text" id="msg-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
+            <button class="btn" style="width: 45px; padding:12px; border-radius:50%;" onclick="send()">🚀</button>
+        </div>
+    </div>
+</div>
 
-        // Переключение Вход/Регистрация
-        function setAuthMode(mode) {
-            authMode = mode;
-            document.getElementById('email').style.display = mode === 'register' ? 'block' : 'none';
-            document.getElementById('auth-btn').innerText = mode === 'register' ? 'Создать Premium аккаунт' : 'Войти в сеть';
-            document.getElementById('tab-login').classList.toggle('active', mode === 'login');
-            document.getElementById('tab-register').classList.toggle('active', mode === 'register');
-        }
+<div id="search-modal" onclick="closeSearch(event)">
+    <div class="glass-card" style="padding: 20px;" onclick="event.stopPropagation()">
+        <h3>Поиск людей</h3>
+        <input type="text" id="search-input" placeholder="Введи ник..." oninput="doSearch()">
+        <div class="search-results" id="search-results"></div>
+    </div>
+</div>
 
-        // Логика Аuth
-        async function handleAuth() {
-            const nick = document.getElementById('nick').value.trim();
-            const pass = document.getElementById('pass').value.trim();
-            const email = document.getElementById('email').value.trim();
+<script>
+    const socket = io();
+    let user = null;
+    let activeChat = 'community';
+    let myChats = { public: [], private: [] };
 
-            if(!nick || !pass || (authMode === 'register' && !email)) return alert('Заполни все поля!');
-
-            try {
-                const res = await fetch('/api/auth', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action: authMode, nick, password: pass, email })
-                });
-                const data = await res.json();
-
-                if(data.status === 'ok') {
-                    if(authMode === 'register') {
-                        alert('Premium аккаунт создан! Теперь войдите.');
-                        setAuthMode('login');
-                    } else {
-                        currentUser = data.user;
-                        startApp();
-                    }
-                } else alert(data.message);
-            } catch(e) { alert('Ошибка соединения с сервером'); }
-        }
-
-        // Запуск основного интерфейса
-        function startApp() {
-            document.getElementById('auth-ui').style.display = 'none';
-            document.getElementById('main-ui').style.display = 'flex';
-            document.getElementById('my-avatar').src = currentUser.avatar;
-            
-            // Кнопка входа: bloody / Zavoz7152
-            
-            socket.emit('join_chat', { chat_id: activeChat });
-        }
-
-        // Отправка сообщения
-        function sendMsg() {
-            const input = document.getElementById('msg-input');
-            if(!input.value.trim()) return;
-            
-            socket.emit('new_msg', {
-                chat_id: activeChat,
-                sender: currentUser.nick,
-                sender_av: currentUser.avatar,
-                text: input.value,
-                is_admin: currentUser.is_admin
-            });
-            input.value = '';
-            input.focus();
-        }
-
-        function handleKeyPress(e) { if(e.key === 'Enter') sendMsg(); }
-
-        // Добавление реакции
-        function addReaction(msgId, emoji) {
-            socket.emit('add_reaction', {
-                msg_id: msgId,
-                user: currentUser.nick,
-                emoji: emoji,
-                chat_id: activeChat
-            });
-        }
-
-        // --- Socket.IO события ---
-
-        // Загрузка истории
-        socket.on('load_msgs', (msgs) => {
-            const container = document.getElementById('msgs');
-            container.innerHTML = '';
-            msgs.forEach(renderMsg);
-            scrollBottom();
+    // Auth
+    async function login() {
+        const n = document.getElementById('nick').value;
+        const p = document.getElementById('pass').value;
+        const res = await fetch('/api/auth', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'login', nick: n, password: p })
         });
-
-        // Получение нового сообщения
-        socket.on('msg_broadcast', (msg) => {
-            if(msg.chat_id === activeChat) {
-                renderMsg(msg);
-                scrollBottom();
-            }
-        });
-
-        // Обновление реакций в реальном времени
-        socket.on('update_reactions', (data) => {
-            const msgBubble = document.querySelector(`[data-msg-id="${data.msg_id}"]`);
-            if(msgBubble) {
-                renderReactionsBar(msgBubble, data.msg_id, JSON.parse(data.reactions));
-            }
-        });
-
-        // --- Отрисовка UI ---
-
-        function renderMsg(msg) {
-            const container = document.getElementById('msgs');
-            const isSelf = msg.sender === currentUser.nick;
-            // Проверка на основателя bloody (галочка берется из БД статуса, но тут для скорости)
-            const verifiedHtml = msg.sender === 'bloody' ? '<span class="verified-badge">✔</span>' : '';
+        const data = await res.json();
+        if(data.status === 'ok') {
+            user = data.user;
+            document.getElementById('auth-ui').style.opacity = '0';
+            setTimeout(() => { document.getElementById('auth-ui').style.display = 'none'; document.getElementById('main-ui').style.display = 'flex'; }, 500);
             
-            const html = `
-                <div class="msg-block ${isSelf ? 'self' : ''}">
-                    <img src="${msg.sender_av}" class="avatar" onerror="this.src='https://api.dicebear.com/8.x/shapes/svg?seed=${msg.sender}'">
-                    <div class="msg-bubble" data-msg-id="${msg.id}">
-                        ${isSelf ? '' : `<div class="msg-info"><b>${msg.sender}</b>${verifiedHtml}</div>`}
-                        <div class="msg-text">${msg.text}</div>
-                        <div class="msg-time">${msg.time}</div>
-                    </div>
+            startApp();
+        } else alert('Неверные данные! Попробуй bloody / Zavoz7152');
+    }
+
+    // Запуск приложения
+    function startApp() {
+        document.getElementById('sidebar-nick').innerText = user.nick;
+        updateUserAvatars(user.avatar);
+        
+        socket.emit('get_my_chats', { nick: user.nick });
+        selectChat('community', 'Flux Community');
+    }
+
+    // Смена аватаров в UI
+    function updateUserAvatars(url) {
+        document.getElementById('sidebar-av').src = url;
+        document.getElementById('header-av').src = url;
+    }
+
+    // Загрузка фото
+    async function uploadAvatar() {
+        const file = document.getElementById('file-input').files[0];
+        if(!file) return;
+        const formData = new FormData();
+        formData.append('avatar', file);
+        formData.append('nick', user.nick);
+        const res = await fetch('/api/upload_avatar', { method: 'POST', body: formData });
+        const data = await res.json();
+        if(data.status === 'ok') {
+            user.avatar = data.avatar_url;
+            updateUserAvatars(user.avatar);
+            alert('Аватар обновлен!');
+        } else alert(data.message);
+    }
+
+    // Боковое меню
+    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+    
+    // Выбор чата (ЛС или Общий)
+    function selectChat(id, name) {
+        activeChat = id;
+        document.getElementById('chat-title').innerText = name.includes(user.nick) ? name.replace(user.nick, '').replace('&', '').trim() : name;
+        if(id !== 'community') document.getElementById('chat-title').innerText = 'ЛС: ' + document.getElementById('chat-title').innerText;
+        
+        socket.emit('join_chat', { chat_id: activeChat });
+        document.getElementById('sidebar').classList.remove('open');
+        renderChatList(); // Перерисовать список, чтобы подсветить активный
+    }
+
+    // Отправка сообщения
+    function send() {
+        const input = document.getElementById('msg-input');
+        if(!input.value.trim()) return;
+        socket.emit('new_msg', { chat_id: activeChat, sender: user.nick, sender_av: user.avatar, text: input.value });
+        input.value = '';
+    }
+
+    // --- Socket Events ---
+    socket.on('my_chats_list', (data) => {
+        myChats = data;
+        renderChatList();
+    });
+
+    socket.on('load_msgs', (msgs) => {
+        const container = document.getElementById('msgs');
+        container.innerHTML = '';
+        msgs.forEach(renderMsg);
+        container.scrollTop = container.scrollHeight;
+    });
+
+    socket.on('msg_broadcast', (msg) => {
+        if(msg.chat_id === activeChat) {
+            renderMsg(msg);
+            document.getElementById('msgs').scrollTop = document.getElementById('msgs').scrollHeight;
+        }
+    });
+
+    // --- UI Rendering ---
+    function renderChatList() {
+        const container = document.getElementById('chat-list');
+        container.innerHTML = '';
+        // Public
+        myChats.public.forEach(c => {
+            container.innerHTML += `<div class="chat-item ${activeChat === c.id ? 'active' : ''}" onclick="selectChat('${c.id}', '${c.name}')"># ${c.name}</div>`;
+        });
+        // ЛС
+        myChats.private.forEach(c => {
+            let otherUser = c.id.replace('chat_', '').replace(user.nick, '').replace('_', '').trim();
+            container.innerHTML += `<div class="chat-item ${activeChat === c.id ? 'active' : ''}" onclick="selectChat('${c.id}', '${otherUser}')">👤 ${otherUser}</div>`;
+        });
+    }
+
+    function renderMsg(m) {
+        const isSelf = m.sender === user.nick;
+        const verified = m.sender === 'bloody' ? '<span class="verified">✔</span>' : '';
+        const html = `
+            <div class="msg-block ${isSelf ? 'self' : ''}">
+                <img src="${m.sender_av}" class="avatar">
+                <div class="bubble">
+                    ${isSelf ? '' : `<div style="font-size:0.7rem; opacity:0.6; margin-bottom:3px;"><b>${m.sender}</b>${verified}</div>`}
+                    <div>${m.text}</div>
+                    <div style="font-size:0.6rem; opacity:0.4; text-align:right; margin-top:3px;">${m.time}</div>
                 </div>
-            `;
-            container.innerHTML += html;
-            
-            // Отрисовываем реакции для этого сообщения
-            const currentBubble = container.querySelector(`[data-msg-id="${msg.id}"]`);
-            renderReactionsBar(currentBubble, msg.id, JSON.parse(msg.reactions));
-        }
+            </div>`;
+        document.getElementById('msgs').innerHTML += html;
+    }
 
-        function renderReactionsBar(bubbleObj, msgId, reactions) {
-            // Удаляем старый бар, если есть
-            const oldBar = bubbleObj.querySelector('.reactions-bar');
-            if(oldBar) oldBar.remove();
-
-            const bar = document.createElement('div');
-            bar.className = 'reactions-bar';
-            
-            // Базовые эмодзи для добавления
-            const quickEmojis = ['🔥', '❤️', '😂', '👍'];
-            let barHtml = '';
-
-            // Показывать уже поставленные реакции
-            for (const [emoji, users] of Object.entries(reactions)) {
-                const isActive = users.includes(currentUser.nick);
-                barHtml += `
-                    <div class="react-btn ${isActive ? 'active' : ''}" onclick="addReaction(${msgId}, '${emoji}')">
-                        ${emoji} <span class="react-count">${users.length}</span>
-                    </div>
-                `;
-            }
-
-            // Кнопка "+" для добавления дефолтного 🔥 если реакций нет
-            if(Object.keys(reactions).length === 0) {
-                 barHtml = `<div class="react-btn" style="opacity:0.3;" onclick="addReaction(${msgId}, '🔥')">🔥 +</div>`;
-            } else {
-                 // Кнопка для добавления ❤️ если его еще нет
-                 if(!reactions['❤️']) barHtml += `<div class="react-btn" style="opacity:0.3;" onclick="addReaction(${msgId}, '❤️')">❤️</div>`;
-            }
-
-            bar.innerHTML = barHtml;
-            bubbleObj.appendChild(bar);
-        }
-
-        function scrollBottom() {
-            const container = document.getElementById('msgs');
-            container.scrollTop = container.scrollHeight;
-        }
-
-    </script>
+    // --- Поиск для ЛС ---
+    function openSearch() { document.getElementById('search-modal').style.display = 'flex'; }
+    function closeSearch(e) { document.getElementById('search-modal').style.display = 'none'; }
+    async function doSearch() {
+        const q = document.getElementById('search-input').value;
+        const res = await fetch(`/api/search?q=${q}&my_nick=${user.nick}`);
+        const users = await res.json();
+        const results = document.getElementById('search-results');
+        results.innerHTML = users.map(u => `
+            <div style="display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--border); cursor:pointer;" onclick="startDM('${u.nick}')">
+                <img src="${u.avatar}" class="avatar" style="width:25px; height:25px;">
+                <div>${u.nick} ${u.is_admin ? '✔' : ''}</div>
+            </div>
+        `).join('');
+    }
+    // Начать ЛС
+    function startDM(nick) {
+        // Создаем уникальный ID чата (сортируем ники, чтобы chat_a_b == chat_b_a)
+        const id = 'chat_' + [user.nick, nick].sort().join('_');
+        selectChat(id, nick);
+        closeSearch();
+        socket.emit('get_my_chats', { nick: user.nick }); // Обновить список чатов слева
+    }
+</script>
 </body>
 </html>
 
