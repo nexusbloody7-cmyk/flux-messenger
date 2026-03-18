@@ -2,142 +2,94 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Flux Ultra | Future of Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux Messenger | Liquid Glass</title>
     <style>
         :root {
-            --deep-blue: #010409;
-            --liquid-glass: rgba(255, 255, 255, 0.025);
-            --border: rgba(255, 255, 255, 0.08);
+            --bg: #020617;
+            --glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
             --accent: #007aff;
-            --verified: #007aff;
         }
-
         body {
-            background-color: var(--deep-blue);
-            background-image: radial-gradient(at 10% 10%, rgba(0, 122, 255, 0.1) 0px, transparent 50%);
-            color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden;
+            background: var(--bg); color: white; font-family: 'Inter', sans-serif;
+            margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh;
+            background-image: radial-gradient(circle at 50% -20%, #1e293b, transparent);
         }
-
-        /* --- Вход / Регистрация (Liquid Glass) --- */
-        .auth-container {
-            background: var(--liquid-glass);
-            backdrop-filter: blur(30px) saturate(180%);
-            -webkit-backdrop-filter: blur(30px) saturate(180%);
-            border: 1px solid var(--border);
-            border-radius: 35px;
-            padding: 50px 40px;
-            width: 90%; max-width: 380px; text-align: center;
-            box-shadow: 0 30px 60px rgba(0,0,0,0.6);
-            transition: 0.5s ease;
+        .container {
+            background: var(--glass); backdrop-filter: blur(30px);
+            border: 1px solid var(--border); border-radius: 40px;
+            width: 400px; padding: 40px; text-align: center; box-shadow: 0 25px 50px rgba(0,0,0,0.5);
         }
-
-        .auth-header h1 { font-size: 3rem; font-weight: 900; letter-spacing: -2px; margin: 0; background: linear-gradient(#fff, #888); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .auth-header p { opacity: 0.6; font-size: 0.95rem; margin-top: 5px; }
-
-        .auth-tabs { display: flex; gap: 10px; margin-top: 30px; }
-        .tab-btn { flex: 1; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: white; border-radius: 12px; cursor: pointer; transition: 0.3s; }
-        .tab-btn.active { background: var(--accent); border-color: var(--accent); }
-
-        .input-group { margin-top: 25px; }
-        input { width: 100%; padding: 16px; margin-bottom: 15px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 14px; color: white; box-sizing: border-box; font-size: 1rem; }
-        input:focus { border-color: var(--accent); outline: none; background: rgba(0,0,0,0.5); }
-
-        .action-btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 14px; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; transition: 0.3s; box-shadow: 0 10px 20px rgba(0, 122, 255, 0.3); }
-        .action-btn:hover { transform: translateY(-2px); box-shadow: 0 15px 25px rgba(0, 122, 255, 0.4); }
-
-        /* --- Основной интерфейс (Скрыт по умолчанию) --- */
-        #main-ui { display: none; width: 100%; height: 100%; grid-template-columns: 280px 1fr; }
-        .sidebar { background: rgba(2, 6, 15, 0.5); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; }
-        .chat-area { display: flex; flex-direction: column; background: var(--deep-blue); }
-
-        /* Галочка основателя */
-        .verified-badge { color: var(--verified); margin-left: 5px; font-size: 1rem; vertical-align: middle; }
-        .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+        h1 { font-size: 3rem; font-weight: 900; letter-spacing: -2px; margin: 0; }
+        p.slogan { opacity: 0.5; font-size: 0.9rem; margin-bottom: 30px; }
+        input {
+            width: 100%; padding: 15px; margin: 10px 0; background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border); border-radius: 15px; color: white; box-sizing: border-box;
+        }
+        .btn {
+            width: 100%; padding: 15px; background: var(--accent); border: none;
+            border-radius: 15px; color: white; font-weight: bold; cursor: pointer; margin-top: 10px;
+        }
+        .verified { color: #007aff; margin-left: 5px; }
+        #chat-ui { display: none; }
     </style>
 </head>
 <body>
-
-    <div class="auth-container" id="auth-ui">
-        <div class="auth-header">
-            <h1>FLUX</h1>
-            <p>Будущее общение здесь!</p>
-        </div>
-
-        <div class="auth-tabs">
-            <button class="tab-btn active" id="tab-login" onclick="setAuthMode('login')">Вход</button>
-            <button class="tab-btn" id="tab-register" onclick="setAuthMode('register')">Регистрация</button>
-        </div>
-
-        <div class="input-group">
-            <input type="email" id="email" placeholder="Email (для регистрации)" style="display:none;">
+    <div class="container" id="auth-ui">
+        <h1>FLUX</h1>
+        <p class="slogan">Будущее общение здесь!</p>
+        <div id="reg-form">
+            <input type="email" id="email" placeholder="Email">
             <input type="text" id="nick" placeholder="Никнейм">
             <input type="password" id="pass" placeholder="Пароль">
-            <button class="action-btn" id="auth-btn" onclick="handleAuth()">Войти в сеть</button>
+            <button class="btn" onclick="auth('register')">Создать аккаунт</button>
+            <p onclick="toggleAuth()" style="cursor:pointer; font-size: 0.8rem; margin-top: 15px;">Уже есть аккаунт? Войти</p>
         </div>
     </div>
 
-    <div id="main-ui">
-        <div class="sidebar">
-            <div style="margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
-                <input type="text" id="search" placeholder="Поиск по нику..." style="padding: 10px; border-radius: 10px; margin: 0;">
-            </div>
-            <h3>Чаты</h3>
-            <div id="chat-list">
-                <div style="color:var(--accent); cursor:pointer;"># Flux Community</div>
-            </div>
+    <div class="container" id="chat-ui" style="width: 90%; max-width: 800px; height: 80vh;">
+        <div style="display:flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px;">
+            <h2 id="user-display"></h2>
+            <input type="text" placeholder="Поиск по нику..." style="width: 200px; margin: 0; padding: 8px;">
         </div>
-        <div class="chat-area">
-            <div style="padding:20px; border-bottom:1px solid var(--border);">Чат: Flux Community</div>
-            <div id="messages" style="flex:1; padding:20px; overflow-y:auto;">
-                <div>
-                    <img src="/static/uploads/bloody_av.png" class="avatar" onerror="this.src='https://i.pravatar.cc/40?u=bloody'">
-                    <b>bloody<span class="verified-badge">✔</span></b>: Добро пожаловать во FLUX!
-                </div>
+        <div id="msg-box" style="height: 60%; overflow-y: auto; text-align: left; padding: 20px;">
             </div>
-            <div style="padding:20px; display:flex; gap:10px; border-top:1px solid var(--border);">
-                <input type="text" placeholder="Сообщение..." style="margin:0;">
-                <button class="action-btn" style="width:auto; margin:0; padding: 10px 20px;">Send</button>
-            </div>
+        <div style="display:flex; gap: 10px;">
+            <input type="text" id="msg-input" placeholder="Введите сообщение...">
+            <button class="btn" style="width: 80px; margin: 0;">🚀</button>
         </div>
     </div>
 
-    <script src="https://cdn.socketio.io/4.7.2/socketio.min.js"></script>
     <script>
-        const socket = io();
-        let authMode = 'login';
-
-        function setAuthMode(mode) {
-            authMode = mode;
-            document.getElementById('email').style.display = mode === 'register' ? 'block' : 'none';
-            document.getElementById('auth-btn').innerText = mode === 'register' ? 'Создать аккаунт' : 'Войти в сеть';
-            document.getElementById('tab-login').classList.toggle('active', mode === 'login');
-            document.getElementById('tab-register').classList.toggle('active', mode === 'register');
+        let isLogin = false;
+        function toggleAuth() {
+            isLogin = !isLogin;
+            document.querySelector('h1').innerText = isLogin ? 'LOG IN' : 'FLUX';
+            document.getElementById('email').style.display = isLogin ? 'none' : 'block';
+            document.querySelector('.btn').innerText = isLogin ? 'Войти в сеть' : 'Создать аккаунт';
         }
 
-        async function handleAuth() {
+        async function auth(type) {
             const nick = document.getElementById('nick').value;
             const pass = document.getElementById('pass').value;
             const email = document.getElementById('email').value;
-
-            if(!nick || !pass || (authMode === 'register' && !email)) return alert('Заполни все поля!');
-
-            const res = await fetch('/api/auth', {
+            
+            const url = isLogin ? '/api/login' : '/api/register';
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action: authMode, nick, password: pass, email })
+                body: JSON.stringify({ nick, email, password: pass })
             });
             const data = await res.json();
-
+            
             if(data.status === 'ok') {
-                if(authMode === 'register') alert('Регистрация прошла! Теперь войдите.');
-                else {
+                if(isLogin) {
                     document.getElementById('auth-ui').style.display = 'none';
-                    document.getElementById('main-ui').style.display = 'grid';
-                    // Тут будет логика загрузки чатов
-                }
-            } else alert(data.message);
+                    document.getElementById('chat-ui').style.display = 'block';
+                    document.getElementById('user-display').innerHTML = `${data.user.nick} ${data.user.is_admin ? '<span class="verified">✔</span>' : ''}`;
+                } else { alert("Регистрация успешна! Теперь войдите."); toggleAuth(); }
+            } else { alert("Ошибка входа/регистрации"); }
         }
     </script>
 </body>
