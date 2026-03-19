@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <title>Flux Pro</title>
+    <title>Flux Pro Mobile</title>
     <style>
         :root {
             --bg: #030812;
-            --panel: rgba(10, 25, 47, 0.7);
+            --panel: rgba(10, 25, 47, 0.8);
             --accent: #007AFF;
             --glass: rgba(255, 255, 255, 0.05);
             --border: rgba(255, 255, 255, 0.1);
@@ -15,90 +15,114 @@
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: white; font-family: -apple-system, system-ui, sans-serif; height: 100vh; display: flex; overflow: hidden; }
 
-        /* Sidebar */
-        #sidebar { width: 320px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; backdrop-filter: blur(20px); }
-        .sb-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .chat-list { flex: 1; overflow-y: auto; }
-        .chat-item { padding: 15px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); transition: 0.2s; }
-        .chat-item:hover { background: var(--glass); }
-        .chat-item.active { background: rgba(0, 122, 255, 0.15); border-left: 4px solid var(--accent); }
-        .chat-icon { width: 50px; height: 50px; border-radius: 16px; background: linear-gradient(45deg, #004e92, #000428); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; }
+        /* Sidebar Adaptive */
+        #sidebar { 
+            width: 320px; 
+            background: var(--panel); 
+            border-right: 1px solid var(--border); 
+            display: flex; 
+            flex-direction: column; 
+            backdrop-filter: blur(20px);
+            transition: transform 0.3s ease;
+            z-index: 100;
+        }
 
         /* Main Area */
-        #main { flex: 1; display: flex; flex-direction: column; background: radial-gradient(circle at top right, #0a192f, #030812); }
-        .top-bar { padding: 12px 20px; background: var(--panel); backdrop-filter: blur(10px); display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border); }
-        #msgs { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        #main { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            background: radial-gradient(circle at top right, #0a192f, #030812);
+            position: relative;
+        }
+
+        /* Mobile Logic */
+        @media (max-width: 768px) {
+            #sidebar {
+                position: absolute;
+                left: 0; top: 0; bottom: 0;
+                transform: translateX(-100%); /* Скрыт за экраном */
+            }
+            #sidebar.open {
+                transform: translateX(0); /* Выезжает */
+                width: 85%;
+            }
+            .menu-btn { display: block !important; }
+        }
+
+        .menu-btn {
+            display: none;
+            background: var(--glass);
+            border: 1px solid var(--border);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .sb-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .chat-list { flex: 1; overflow-y: auto; }
+        .chat-item { padding: 15px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        .chat-item.active { background: rgba(0, 122, 255, 0.15); }
+        .chat-icon { width: 45px; height: 45px; border-radius: 14px; background: linear-gradient(45deg, #004e92, #000428); display: flex; align-items: center; justify-content: center; font-weight: bold; }
+
+        .top-bar { padding: 10px 15px; background: var(--panel); backdrop-filter: blur(10px); display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+        #msgs { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
 
         /* Bubbles */
-        .bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; position: relative; font-size: 15px; line-height: 1.4; animation: fadeIn 0.3s ease; }
-        .my { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(0,122,255,0.3); }
+        .bubble { max-width: 85%; padding: 10px 14px; border-radius: 18px; position: relative; font-size: 15px; line-height: 1.4; }
+        .my { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; box-shadow: 0 4px 12px rgba(0,122,255,0.2); }
         .other { align-self: flex-start; background: var(--glass); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-        .sender-name { font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; color: #8ebfff; }
-        .badge { width: 14px; height: 14px; background: var(--accent); border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; }
+        
+        .sender-info { font-size: 11px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; gap: 5px; color: #8ebfff; }
+        .badge { width: 14px; height: 14px; background: var(--accent); border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 8px; }
 
-        /* Input */
-        .input-box { padding: 15px 20px calc(15px + env(safe-area-inset-bottom)); background: var(--panel); display: flex; gap: 12px; border-top: 1px solid var(--border); }
-        input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); padding: 12px 18px; border-radius: 14px; color: white; font-size: 16px; outline: none; }
-        .send-btn { width: 45px; height: 45px; border-radius: 14px; background: var(--accent); border: none; color: white; font-size: 20px; cursor: pointer; transition: 0.2s; }
-        .send-btn:active { transform: scale(0.9); }
+        /* Input Area */
+        .input-box { padding: 10px 15px calc(10px + env(safe-area-inset-bottom)); background: var(--panel); display: flex; gap: 10px; border-top: 1px solid var(--border); }
+        input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); padding: 12px; border-radius: 15px; color: white; font-size: 16px; outline: none; }
+        .send-btn { width: 45px; height: 45px; border-radius: 15px; background: var(--accent); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
-        /* Profile Modal */
-        #profile-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 20px; }
-        .modal-card { width: 100%; max-width: 350px; background: #0a192f; border: 1px solid var(--border); border-radius: 24px; padding: 25px; text-align: center; }
-        .modal-ava { width: 100px; height: 100px; border-radius: 30%; object-fit: cover; margin-bottom: 15px; border: 2px solid var(--accent); }
-
-        /* Auth */
+        /* Modals and Auth - Leave as is but make responsive */
         #auth { position: fixed; inset: 0; background: var(--bg); z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 20px; }
         .auth-card { width: 100%; max-width: 320px; text-align: center; }
-
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        @media (max-width: 768px) { #sidebar { width: 85px; } .sb-text, .sb-header b { display: none; } }
+        #profile-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 20px; }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-card">
-        <h1 style="font-size: 3rem; margin-bottom: 20px; color: var(--accent);">FLUX</h1>
+        <h1 style="font-size: 3.5rem; color: var(--accent); margin: 0 0 20px 0;">FLUX</h1>
         <div id="reg-form" style="display:none">
-            <input type="text" id="r-nick" placeholder="Ваше имя">
+            <input type="text" id="r-nick" placeholder="Никнейм">
             <input type="text" id="r-ava" placeholder="Ссылка на фото">
         </div>
         <input type="email" id="l-email" placeholder="Email">
         <input type="password" id="l-pass" placeholder="Пароль">
-        <button class="send-btn" style="width:100%; margin-top:10px;" onclick="doAuth()">Войти</button>
-        <p onclick="this.parentElement.querySelector('#reg-form').style.display='block'" style="font-size:13px; opacity:0.5; margin-top:15px; cursor:pointer">Нет аккаунта? Регистрация</p>
-    </div>
-</div>
-
-<div id="profile-modal" onclick="if(event.target===this) this.style.display='none'">
-    <div class="modal-card">
-        <img id="p-ava-img" class="modal-ava" src="">
-        <h2 id="p-nick" style="margin: 0;"></h2>
-        <div id="p-uname" style="color:var(--accent); margin-bottom:15px;"></div>
-        <textarea id="p-bio" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--border); color:white; border-radius:10px; padding:10px; margin-bottom:15px;"></textarea>
-        <input type="text" id="p-ava-input" placeholder="Новая ссылка на фото" style="margin-bottom:15px;">
-        <button class="send-btn" style="width:100%" onclick="saveProfile()">Сохранить</button>
+        <button class="send-btn" style="width:100%; margin-top:15px;" onclick="doAuth()">Войти</button>
+        <p onclick="document.getElementById('reg-form').style.display='block'" style="font-size:13px; opacity:0.5; margin-top:20px; cursor:pointer">Создать аккаунт</p>
     </div>
 </div>
 
 <div id="sidebar">
     <div class="sb-header">
-        <b>Flux</b>
-        <img id="my-mini-ava" src="" style="width:35px; height:35px; border-radius:10px; cursor:pointer" onclick="openProfile()">
+        <b style="font-size:20px">Чаты</b>
+        <img id="my-mini-ava" src="" style="width:40px; height:40px; border-radius:12px; cursor:pointer" onclick="openProfile()">
     </div>
     <div class="chat-list" id="chat-list"></div>
     <div style="padding:15px">
-        <button class="send-btn" style="width:100%" onclick="createGroup()">+ Создать группу</button>
+        <button class="send-btn" style="width:100%; border-radius:12px" onclick="createGroup()">+ Создать группу</button>
     </div>
 </div>
 
 <div id="main">
     <div class="top-bar">
-        <div class="chat-icon" id="curr-chat-icon" style="width:40px; height:40px; border-radius:12px;">F</div>
-        <div>
-            <div id="curr-chat-name" style="font-weight:bold">Flux Community</div>
-            <div style="font-size:11px; opacity:0.5">Общий чат для всех</div>
+        <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+        <div class="chat-icon" id="curr-chat-icon" style="width:35px; height:35px; border-radius:10px; font-size:16px;">F</div>
+        <div style="margin-left:10px">
+            <div id="curr-chat-name" style="font-weight:bold; font-size:15px">Flux Community</div>
+            <div id="status" style="font-size:10px; opacity:0.5">онлайн</div>
         </div>
     </div>
     <div id="msgs"></div>
@@ -108,9 +132,23 @@
     </div>
 </div>
 
+<div id="profile-modal" onclick="if(event.target===this) this.style.display='none'">
+    <div style="width:100%; max-width:320px; background:#0a192f; border-radius:25px; padding:25px; text-align:center; border:1px solid var(--border)">
+        <img id="p-ava-img" src="" style="width:80px; height:80px; border-radius:20px; border:2px solid var(--accent)">
+        <h2 id="p-nick" style="margin:10px 0 0 0"></h2>
+        <p id="p-uname" style="color:var(--accent); margin-bottom:15px"></p>
+        <textarea id="p-bio" placeholder="О себе..." style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--border); color:white; border-radius:12px; padding:10px; min-height:80px"></textarea>
+        <button class="send-btn" style="width:100%; margin-top:15px" onclick="saveProfile()">Сохранить</button>
+    </div>
+</div>
+
 <script>
     let me = null;
     let currentChat = 'community';
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
 
     async function doAuth() {
         const isReg = document.getElementById('reg-form').style.display === 'block';
@@ -135,17 +173,15 @@
         document.getElementById('p-ava-img').src = me.avatar;
         document.getElementById('p-nick').innerText = me.nick;
         document.getElementById('p-uname').innerText = me.username;
-        document.getElementById('p-bio').value = me.bio || 'Без описания';
+        document.getElementById('p-bio').value = me.bio || '';
         document.getElementById('profile-modal').style.display = 'flex';
     }
 
     async function saveProfile() {
-        const newBio = document.getElementById('p-bio').value;
-        const newAva = document.getElementById('p-ava-input').value || me.avatar;
+        const bio = document.getElementById('p-bio').value;
         await fetch('/api/profile', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ nick: me.nick, bio: newBio, avatar: newAva }) });
-        me.bio = newBio; me.avatar = newAva;
-        document.getElementById('my-mini-ava').src = me.avatar;
+            body: JSON.stringify({ nick: me.nick, bio: bio, avatar: me.avatar }) });
+        me.bio = bio;
         document.getElementById('profile-modal').style.display = 'none';
     }
 
@@ -157,8 +193,14 @@
         chats.forEach(c => {
             const el = document.createElement('div');
             el.className = `chat-item ${currentChat === c.id ? 'active' : ''}`;
-            el.onclick = () => { currentChat = c.id; document.getElementById('curr-chat-name').innerText = c.name; document.getElementById('curr-chat-icon').innerText = c.name[0]; loadChats(); loadMsgs(); };
-            el.innerHTML = `<div class="chat-icon">${c.name[0]}</div><div class="sb-text"><b>${c.name}</b><br><small style="opacity:0.5">${c.type}</small></div>`;
+            el.onclick = () => { 
+                currentChat = c.id; 
+                document.getElementById('curr-chat-name').innerText = c.name; 
+                document.getElementById('curr-chat-icon').innerText = c.name[0];
+                if(window.innerWidth <= 768) toggleSidebar(); 
+                loadMsgs();
+            };
+            el.innerHTML = `<div class="chat-icon">${c.name[0]}</div><div><b>${c.name}</b></div>`;
             list.appendChild(el);
         });
     }
@@ -167,19 +209,20 @@
         const r = await fetch(`/api/messages?chat_id=${currentChat}`);
         const msgs = await r.json();
         const cont = document.getElementById('msgs');
-        cont.innerHTML = '';
+        let html = '';
         msgs.forEach(m => {
             const isMe = m.sender === me.nick;
-            cont.innerHTML += `
+            html += `
                 <div class="bubble ${isMe ? 'my' : 'other'}">
-                    <div class="sender-name">
-                        <img src="${m.avatar}" style="width:18px; height:18px; border-radius:50%">
+                    <div class="sender-info">
+                        <img src="${m.avatar}" style="width:16px; height:16px; border-radius:50%">
                         ${m.sender} ${m.is_v ? '<span class="badge">✓</span>' : ''}
                     </div>
                     <div>${m.text}</div>
-                    <div style="font-size:10px; opacity:0.6; text-align:right; margin-top:4px">${m.time}</div>
+                    <div style="font-size:9px; opacity:0.5; text-align:right; margin-top:3px">${m.time}</div>
                 </div>`;
         });
+        cont.innerHTML = html;
         cont.scrollTop = cont.scrollHeight;
     }
 
@@ -198,7 +241,7 @@
             body: JSON.stringify({ name, type:'group', owner: me.nick }) }).then(() => loadChats());
     }
 
-    function init() { loadChats(); loadMsgs(); setInterval(loadMsgs, 2500); }
+    function init() { loadChats(); loadMsgs(); setInterval(loadMsgs, 3000); }
 </script>
 </body>
 </html>
