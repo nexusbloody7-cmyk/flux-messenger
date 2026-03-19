@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <title>Flux Private V6</title>
+    <title>Flux Messenger</title>
     <style>
         :root {
             --bg: #030812;
@@ -25,7 +25,7 @@
             display: flex; height: 100vh; height: -webkit-fill-available; width: 100%;
         }
 
-        /* Сайдбар - Расширенный для поиска */
+        /* Сайдбар */
         #sidebar { 
             width: 320px; background: var(--panel); border-right: 1px solid var(--border); 
             display: flex; flex-direction: column; backdrop-filter: blur(20px);
@@ -63,7 +63,7 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        /* ВВОД - Прижатый */
+        /* ВВОД */
         .input-box { 
             padding: 10px 15px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); 
             background: var(--panel); display: flex; gap: 10px; 
@@ -111,7 +111,7 @@
     <div class="modal-card" style="background:var(--bg);">
         <h1 style="font-size:3.5rem; color:var(--accent); margin-bottom:20px;">FLUX</h1>
         <div id="reg-fields" style="display:none">
-            <input type="text" id="r-nick" placeholder="Имя (для галочки bloody)" style="width:100%; margin-bottom:10px;">
+            <input type="text" id="r-nick" placeholder="Ваше Имя / Никнейм" style="width:100%; margin-bottom:10px;">
             <input type="text" id="r-ava" placeholder="Ссылка на фото (URL)" style="width:100%; margin-bottom:10px;">
         </div>
         <input type="email" id="l-email" placeholder="Email" style="width:100%; margin-bottom:10px;">
@@ -135,7 +135,7 @@
 <div class="app-container">
     <div id="sidebar">
         <div style="padding:15px; height:60px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-            <b style="font-size:18px">Flux Glass</b>
+            <b style="font-size:18px">Flux Messenger</b>
             <img id="my-mini-ava" src="" style="width:38px; height:38px; border-radius:10px; cursor:pointer; object-fit:cover;" onclick="openProfile()">
         </div>
         
@@ -192,7 +192,6 @@
         else { alert(d.msg || "Ошибка входа"); }
     }
 
-    // Профиль
     function openProfile() {
         document.getElementById('p-ava-img').src = me.avatar; document.getElementById('p-nick').innerText = me.nick; document.getElementById('p-uname').innerText = me.username;
         document.getElementById('p-bio').value = me.bio || ''; document.getElementById('profile-modal').style.display = 'flex';
@@ -204,23 +203,16 @@
         me.bio = bio; me.avatar = ava; document.getElementById('my-mini-ava').src = me.avatar; document.getElementById('profile-modal').style.display = 'none';
     }
 
-    // Поиск и создание Лички
     async function findAndStartDirect() {
         const targetUname = document.getElementById('direct-target').value;
         if(!targetUname.startsWith('@') || targetUname.length < 3) { alert("Введи @юзернейм собеседника!"); return; }
-        
-        const r = await fetch('/api/chats', { 
-            method:'POST', headers:{'Content-Type':'application/json'}, 
-            body: JSON.stringify({ type:'direct', owner: me.nick, target: targetUname }) 
-        });
+        const r = await fetch('/api/chats', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type:'direct', owner: me.nick, target: targetUname }) });
         const d = await r.json();
         if(d.status === 'ok') { currentChat = d.id; loadChats(); loadMsgs(); document.getElementById('direct-target').value = ''; }
-        else { alert("Юзер не найден или ошибка!"); }
+        else { alert("Юзер не найден!"); }
     }
 
-    // Чаты
     async function loadChats() {
-        // Запрос к API теперь включает никнейм юзера для фильтрации личек
         const r = await fetch(`/api/chats?user_nick=${me.nick}`);
         const chats = await r.json();
         const list = document.getElementById('chat-list');
@@ -230,31 +222,20 @@
             el.style.padding = '12px 15px'; el.style.cursor = 'pointer'; el.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
             el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.gap = '12px';
             if(currentChat === c.id) el.style.background = 'rgba(0,122,255,0.1)';
-
             const isDirect = c.type === 'direct';
-            // Если директ-чат, используем имя и аву собеседника
             const cName = isDirect ? c.other_user : c.name;
-            const cIcon = isDirect ? `<img src="${c.avatar}" style="width:35px; height:35px; border-radius:8px; object-fit:cover;">` : `<div style="width:35px; height:35px; border-radius:8px; background:var(--glass); display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px;">${c.name[0].toUpperCase()}</div>`;
-            
-            el.innerHTML = `${cIcon}
-                            <div><b style="font-size:14px;">${cName}</b><br><small style="opacity:0.5; font-size:11px;">${c.type}</small></div>`;
-            
-            el.onclick = () => { 
-                currentChat = c.id; document.getElementById('curr-chat-name').innerText = cName;
-                document.getElementById('curr-chat-icon').innerHTML = isDirect ? cIcon : c.name[0].toUpperCase();
-                if(window.innerWidth <= 768) toggleSidebar(); loadMsgs();
-            };
+            const cIcon = isDirect ? `<img src="${c.avatar}" style="width:35px; height:35px; border-radius:8px; object-fit:cover;">` : `<div style="width:35px; height:35px; border-radius:8px; background:var(--glass); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px;">${c.name[0].toUpperCase()}</div>`;
+            el.innerHTML = `${cIcon}<div><b style="font-size:14px;">${cName}</b><br><small style="opacity:0.5; font-size:11px;">${c.type}</small></div>`;
+            el.onclick = () => { currentChat = c.id; document.getElementById('curr-chat-name').innerText = cName; document.getElementById('curr-chat-icon').innerHTML = isDirect ? cIcon : c.name[0].toUpperCase(); if(window.innerWidth <= 768) toggleSidebar(); loadMsgs(); };
             list.appendChild(el);
         });
     }
 
     function createGroup() {
         const name = prompt("Название новой группы:");
-        if(name) fetch('/api/chats', { method:'POST', headers:{'Content-Type':'application/json'}, 
-            body: JSON.stringify({ name, type:'group', owner: me.nick }) }).then(() => loadChats());
+        if(name) fetch('/api/chats', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, type:'group', owner: me.nick }) }).then(() => loadChats());
     }
 
-    // Сообщения
     async function loadMsgs() {
         const r = await fetch(`/api/messages?chat_id=${currentChat}`);
         const msgs = await r.json();
@@ -262,29 +243,18 @@
         let html = '';
         msgs.forEach(m => {
             const isMe = m.sender === me.nick;
-            html += `
-                <div class="bubble ${isMe ? 'my' : 'other'}">
-                    <div style="font-size:11px; font-weight:bold; color:#8ebfff; margin-bottom:4px; display:flex; align-items:center; gap:5px;">
-                        <img src="${m.avatar}" style="width:16px; height:16px; border-radius:50%; object-fit:cover;">
-                        ${m.sender} ${m.is_v ? '<span class="badge">✓</span>':''}
-                    </div>
-                    <div style="word-wrap: break-word;">${m.text}</div>
-                    <div style="font-size:9px; opacity:0.5; text-align:right; margin-top:4px">${m.time}</div>
-                </div>`;
+            html += `<div class="bubble ${isMe ? 'my' : 'other'}"><div style="font-size:11px; font-weight:bold; color:#8ebfff; margin-bottom:4px; display:flex; align-items:center; gap:5px;"><img src="${m.avatar}" style="width:16px; height:16px; border-radius:50%; object-fit:cover;">${m.sender} ${m.is_v ? '<span class="badge">✓</span>':''}</div><div style="word-wrap: break-word;">${m.text}</div><div style="font-size:9px; opacity:0.5; text-align:right; margin-top:4px">${m.time}</div></div>`;
         });
-        cont.innerHTML = html;
-        cont.scrollTop = cont.scrollHeight;
+        cont.innerHTML = html; cont.scrollTop = cont.scrollHeight;
     }
 
     async function send() {
-        const t = document.getElementById('m-text');
-        if(!t.value.trim()) return;
-        await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, 
-            body: JSON.stringify({ chat_id: currentChat, sender: me.nick, text: t.value }) });
+        const t = document.getElementById('m-text'); if(!t.value.trim()) return;
+        await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ chat_id: currentChat, sender: me.nick, text: t.value }) });
         t.value = ''; loadMsgs();
     }
 
-    function init() { loadChats(); loadMsgs(); setInterval(loadMsgs, 2500); setInterval(loadChats, 6000); }
+    function init() { loadChats(); loadMsgs(); setInterval(loadMsgs, 2500); setInterval(loadChats, 8000); }
 </script>
 </body>
 </html>
