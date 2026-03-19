@@ -3,38 +3,25 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'flux_final_fix_v7'
+app.config['SECRET_KEY'] = 'flux_v8_power'
 
 def get_db():
-    # Используем новое имя БД, чтобы точно избежать конфликтов старых таблиц
-    conn = sqlite3.connect('flux_v7_final.db')
+    # Новое имя БД для чистого запуска
+    conn = sqlite3.connect('flux_v8_final.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-    # Пользователи
-    cur.execute('''CREATE TABLE IF NOT EXISTS users 
-        (nick TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, 
-         password TEXT, avatar TEXT, bio TEXT, is_v INTEGER)''')
-    # Чаты
-    cur.execute('''CREATE TABLE IF NOT EXISTS chats 
-        (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT, participants TEXT)''')
-    # Сообщения
-    cur.execute('''CREATE TABLE IF NOT EXISTS messages 
-        (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, sender TEXT, 
-         text TEXT, time TEXT, is_v INTEGER, avatar TEXT)''')
+    # Таблицы
+    cur.execute("CREATE TABLE IF NOT EXISTS users (nick TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT, avatar TEXT, bio TEXT, is_v INTEGER)")
+    cur.execute("CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT, participants TEXT)")
+    cur.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, sender TEXT, text TEXT, time TEXT, is_v INTEGER, avatar TEXT)")
 
-    # Твой бронированный аккаунт
-    cur.execute("""INSERT OR IGNORE INTO users VALUES 
-        ('bloody', '@bloody', 'nexusbloody7@gmail.com', 'Zavoz7152', 
-         'https://img.icons8.com/fluency/96/user-male-circle.png', 
-         'Основатель Flux Messenger.', 1)""")
-    
-    # Дефолтный чат
+    # Твой аккаунт
+    cur.execute("INSERT OR IGNORE INTO users VALUES ('bloody', '@bloody', 'nexusbloody7@gmail.com', 'Zavoz7152', 'https://img.icons8.com/fluency/96/user-male-circle.png', 'Основатель Flux Messenger.', 1)")
     cur.execute("INSERT OR IGNORE INTO chats VALUES ('community', 'Flux Community', 'public', 'system', NULL)")
-    
     conn.commit()
     conn.close()
 
@@ -51,14 +38,13 @@ def auth():
         try:
             uname = "@" + d['nick'].lower().replace(" ", "")
             is_v = 1 if d['nick'].lower() == 'bloody' else 0
-            conn.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                (d['nick'], uname, d['email'], d['password'], d['avatar'], 'Новый пользователь', is_v))
+            conn.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)", (d['nick'], uname, d['email'], d['password'], d['avatar'], 'Новый пользователь', is_v))
             conn.commit()
             return jsonify({"status": "ok", "user": {"nick": d['nick'], "username": uname, "avatar": d['avatar'], "is_v": is_v}})
-        except: return jsonify({"status": "error", "msg": "Ошибка: ник или почта заняты"})
+        except: return jsonify({"status": "error", "msg": "Ошибка регистрации"})
     else:
         u = conn.execute("SELECT * FROM users WHERE email=? AND password=?", (d['email'], d['password'])).fetchone()
-        return jsonify({"status": "ok", "user": dict(u)}) if u else jsonify({"status": "error", "msg": "Неверный вход"})
+        return jsonify({"status": "ok", "user": dict(u)}) if u else jsonify({"status": "error", "msg": "Вход не удался"})
 
 @app.route('/api/messages', methods=['GET', 'POST'])
 def handle_messages():
@@ -66,25 +52,18 @@ def handle_messages():
     if request.method == 'POST':
         try:
             d = request.json
-            # ГАРАНТИРОВАННОЕ ПОЛУЧЕНИЕ ДАННЫХ ОТПРАВИТЕЛЯ
-            u = conn.execute("SELECT avatar, is_v FROM users WHERE nick=?", (d.get('sender'),)).fetchone()
+            sender_nick = d.get('sender')
+            u = conn.execute("SELECT avatar, is_v FROM users WHERE nick=?", (sender_nick,)).fetchone()
             
-            # Подстраховка на случай пустых данных
+            # Если юзера нет в базе (глюк), берем дефолт
             ava = u['avatar'] if u else 'https://img.icons8.com/glassmorphism/96/user.png'
             is_v = u['is_v'] if u else 0
-            chat_id = d.get('chat_id', 'community')
-            text = d.get('text', '')
-            sender = d.get('sender', 'Unknown')
-            t = datetime.now().strftime('%H:%M')
-
-            if text.strip(): # Если текст не пустой
-                conn.execute("INSERT INTO messages (chat_id, sender, text, time, is_v, avatar) VALUES (?, ?, ?, ?, ?, ?)",
-                             (chat_id, sender, text, t, is_v, ava))
-                conn.commit()
-                return jsonify({"status": "ok"})
-            return jsonify({"status": "error", "msg": "Пустое сообщение"})
+            
+            conn.execute("INSERT INTO messages (chat_id, sender, text, time, is_v, avatar) VALUES (?, ?, ?, ?, ?, ?)",
+                         (d.get('chat_id'), sender_nick, d.get('text'), datetime.now().strftime('%H:%M'), is_v, ava))
+            conn.commit()
+            return jsonify({"status": "ok"})
         except Exception as e:
-            print(f"DEBUG ERROR: {e}")
             return jsonify({"status": "error", "msg": str(e)})
     
     c_id = request.args.get('chat_id', 'community')
@@ -100,28 +79,28 @@ def handle_chats():
         d = request.json
         chat_id = str(uuid.uuid4())[:8]
         if d.get('type') == 'direct':
-            participants = sorted([d['owner'], d['target'].replace('@', '')])
-            p_str = ','.join(participants)
-            existing = conn.execute("SELECT id FROM chats WHERE participants=?", (p_str,)).fetchone()
-            if existing: return jsonify({"status": "ok", "id": existing['id']})
-            conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, 'Личка', 'direct', d['owner'], p_str))
+            parts = sorted([d['owner'], d['target'].replace('@', '')])
+            p_str = ','.join(parts)
+            ex = conn.execute("SELECT id FROM chats WHERE participants=?", (p_str,)).fetchone()
+            if ex: return jsonify({"status": "ok", "id": ex['id']})
+            conn.execute("INSERT INTO chats VALUES (?, 'Личка', 'direct', d['owner'], ?)", (chat_id, p_str))
         else:
-            conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, d['name'], 'public', d['owner'], None))
+            conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, NULL)", (chat_id, d['name'], 'public', d['owner']))
         conn.commit()
         return jsonify({"status": "ok", "id": chat_id})
 
-    chats = [dict(c) for c in conn.execute("SELECT * FROM chats").fetchall()]
-    # Если это личка, подменяем имя для отображения
+    all_chats = [dict(c) for c in conn.execute("SELECT * FROM chats").fetchall()]
     res = []
-    for c in chats:
+    for c in all_chats:
         if c['type'] == 'direct':
-            if user_nick and user_nick in c['participants']:
+            if user_nick and user_nick in (c['participants'] or ''):
                 p = c['participants'].split(',')
                 other = p[1] if p[0] == user_nick else p[0]
+                u_info = conn.execute("SELECT avatar FROM users WHERE nick=?", (other,)).fetchone()
                 c['other_user'] = other
+                c['avatar'] = u_info['avatar'] if u_info else ''
                 res.append(c)
-        else:
-            res.append(c)
+        else: res.append(c)
     conn.close()
     return jsonify(res)
 
