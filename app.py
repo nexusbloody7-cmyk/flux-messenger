@@ -3,9 +3,10 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'flux_direct_v6'
+app.config['SECRET_KEY'] = 'flux_ultra_fix_v6'
 
 def get_db():
+    # Используем то же имя БД, что и в V6
     conn = sqlite3.connect('flux_glass_v6.db')
     conn.row_factory = sqlite3.Row
     return conn
@@ -13,27 +14,36 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-    # Пользователи
+    
+    # 1. Таблица пользователей
     cur.execute('''CREATE TABLE IF NOT EXISTS users 
         (nick TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, 
          password TEXT, avatar TEXT, bio TEXT, is_v INTEGER)''')
     
-    # Чаты: id, имя, тип: public/direct, участники (для direct — 'user1,user2')
+    # 2. Таблица чатов
     cur.execute('''CREATE TABLE IF NOT EXISTS chats 
         (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT, participants TEXT)''')
     
-    # Сообщения
+    # 3. Таблица сообщений (с полной структурой)
     cur.execute('''CREATE TABLE IF NOT EXISTS messages 
         (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, sender TEXT, 
          text TEXT, time TEXT, is_v INTEGER, avatar TEXT)''')
     
-    # Твой эталонный аккаунт Основателя
+    # МАГИЯ: Проверка и добавление недостающих колонок (если база уже была создана криво)
+    try:
+        cur.execute("SELECT is_v FROM messages LIMIT 1")
+    except sqlite3.OperationalError:
+        cur.execute("ALTER TABLE messages ADD COLUMN is_v INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE messages ADD COLUMN avatar TEXT")
+        print("База данных успешно обновлена (добавлены колонки)")
+
+    # Твой вечный аккаунт @bloody
     cur.execute("""INSERT OR IGNORE INTO users VALUES 
         ('bloody', '@bloody', 'nexusbloody7@gmail.com', 'Zavoz7152', 
          'https://img.icons8.com/fluency/96/user-male-circle.png', 
-         'Основатель Flux. Создаю будущее.', 1)""")
+         'Основатель Flux Messenger.', 1)""")
     
-    # Общий чат Flux Community
+    # Дефолтный чат
     cur.execute("INSERT OR IGNORE INTO chats VALUES ('community', 'Flux Community', 'public', 'system', NULL)")
     
     conn.commit()
@@ -55,8 +65,9 @@ def auth():
             conn.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)", 
                 (d['nick'], uname, d['email'], d['password'], d['avatar'], 'Новый пользователь Flux', is_v))
             conn.commit()
-            return jsonify({"status": "ok", "user": {"nick": d['nick'], "username": uname, "avatar": d['avatar'], "is_v": is_v, "bio": 'Новый пользователь Flux'}})
-        except: return jsonify({"status": "error", "msg": "Ошибка регистрации"})
+            u = {"nick": d['nick'], "username": uname, "avatar": d['avatar'], "is_v": is_v, "bio": 'Новый пользователь Flux'}
+            return jsonify({"status": "ok", "user": u})
+        except: return jsonify({"status": "error", "msg": "Ник или Email занят"})
     else:
         u = conn.execute("SELECT * FROM users WHERE email=? AND password=?", (d['email'], d['password'])).fetchone()
         return jsonify({"status": "ok", "user": dict(u)}) if u else jsonify({"status": "error", "msg": "Ошибка входа"})
@@ -67,20 +78,26 @@ def update_profile():
     conn = get_db()
     conn.execute("UPDATE users SET bio=?, avatar=? WHERE nick=?", (d['bio'], d['avatar'], d['nick']))
     conn.commit()
-    conn.close()
     return jsonify({"status": "ok"})
 
 @app.route('/api/messages', methods=['GET', 'POST'])
 def handle_messages():
     conn = get_db()
     if request.method == 'POST':
-        d = request.json
-        u = conn.execute("SELECT avatar, is_v FROM users WHERE nick=?", (d['sender'],)).fetchone()
-        t = datetime.now().strftime('%H:%M')
-        conn.execute("INSERT INTO messages (chat_id, sender, text, time, is_v, avatar) VALUES (?, ?, ?, ?, ?, ?)",
-                     (d['chat_id'], d['sender'], d['text'], t, u['is_v'], u['avatar']))
-        conn.commit()
-        return jsonify({"status": "ok"})
+        try:
+            d = request.json
+            # Важный фикс: если отправителя нет в базе (глюк), ставим заглушку
+            u = conn.execute("SELECT avatar, is_v FROM users WHERE nick=?", (d['sender'],)).fetchone()
+            ava = u['avatar'] if u else 'https://img.icons8.com/glassmorphism/96/user.png'
+            is_v = u['is_v'] if u else 0
+            t = datetime.now().strftime('%H:%M')
+            
+            conn.execute("INSERT INTO messages (chat_id, sender, text, time, is_v, avatar) VALUES (?, ?, ?, ?, ?, ?)",
+                         (d['chat_id'], d['sender'], d['text'], t, is_v, ava))
+            conn.commit()
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"status": "error", "msg": str(e)})
     
     c_id = request.args.get('chat_id', 'community')
     msgs = [dict(m) for m in conn.execute("SELECT * FROM messages WHERE chat_id=? ORDER BY id ASC", (c_id,)).fetchall()]
@@ -94,11 +111,8 @@ def handle_chats():
     
     if request.method == 'POST':
         d = request.json
-        conn = get_db()
-        
-        # Проверка на дубликат директ-чата
         if d['type'] == 'direct':
-            participants = sorted([d['owner'], d['target']])
+            participants = sorted([d['owner'], d['target'].replace('@', '')])
             p_str = ','.join(participants)
             existing = conn.execute("SELECT id FROM chats WHERE participants=?", (p_str,)).fetchone()
             if existing: return jsonify({"status": "ok", "id": existing['id']})
@@ -106,45 +120,38 @@ def handle_chats():
             chat_id = "dm_" + str(uuid.uuid4())[:8]
             target_user = conn.execute("SELECT nick FROM users WHERE username=?", (d['target'],)).fetchone()
             if not target_user: return jsonify({"status": "error", "msg": "Юзер не найден"})
-            chat_name = f"{d['owner']} & {target_user['nick']}"
             
-            conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, chat_name, 'direct', d['owner'], p_str))
+            conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, 'Личный чат', 'direct', d['owner'], p_str))
             conn.commit()
             return jsonify({"status": "ok", "id": chat_id})
         
-        # Создание публичной группы (как раньше)
         chat_id = str(uuid.uuid4())[:8]
-        conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, d['name'], 'public', d['owner'], NULL))
+        conn.execute("INSERT INTO chats VALUES (?, ?, ?, ?, ?)", (chat_id, d['name'], 'public', d['owner'], None))
         conn.commit()
         return jsonify({"status": "ok", "id": chat_id})
 
-    # ГЕТ запрос: показать только Flux Community и ТВОИ личные чаты
-    chats = []
-    
-    # 1. Показать Flux Community
-    community = conn.execute("SELECT * FROM chats WHERE id='community'").fetchone()
-    if community: chats.append(dict(community))
-    
-    # 2. Показать директ чаты, где этот юзер — участник
+    # Список чатов
+    chats_res = []
+    # Общий
+    comm = conn.execute("SELECT * FROM chats WHERE id='community'").fetchone()
+    if comm: chats_res.append(dict(comm))
+    # Лички
     if user_nick:
-        my_directs = conn.execute("SELECT * FROM chats WHERE type='direct' AND participants LIKE ?", (f'%{user_nick}%',)).fetchall()
-        for c in my_directs:
-            c_dict = dict(c)
-            # Узнать, с кем личка (чтобы поставить его аватарку и имя)
-            p = c_dict['participants'].split(',')
-            other_user_nick = p[1] if p[0] == user_nick else p[0]
-            other_user = conn.execute("SELECT avatar FROM users WHERE nick=?", (other_user_nick,)).fetchone()
-            
-            c_dict['other_user'] = other_user_nick
-            c_dict['avatar'] = other_user['avatar'] if other_user else 'https://img.icons8.com/glassmorphism/96/user.png'
-            chats.append(c_dict)
-            
-    # 3. Показать публичные группы (которые создали пользователи)
-    other_public = conn.execute("SELECT * FROM chats WHERE type='public' AND id != 'community'").fetchall()
-    for c in other_public: chats.append(dict(c))
-            
+        my_d = conn.execute("SELECT * FROM chats WHERE type='direct' AND participants LIKE ?", (f'%{user_nick}%',)).fetchall()
+        for c in my_d:
+            c_d = dict(c)
+            p = c_d['participants'].split(',')
+            other = p[1] if p[0] == user_nick else p[0]
+            u_data = conn.execute("SELECT avatar FROM users WHERE nick=?", (other,)).fetchone()
+            c_d['other_user'] = other
+            c_d['avatar'] = u_data['avatar'] if u_data else ''
+            chats_res.append(c_d)
+    # Группы
+    pub = conn.execute("SELECT * FROM chats WHERE type='public' AND id != 'community'").fetchall()
+    for c in pub: chats_res.append(dict(c))
+    
     conn.close()
-    return jsonify(chats)
+    return jsonify(chats_res)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
