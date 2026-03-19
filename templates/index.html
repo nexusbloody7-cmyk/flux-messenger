@@ -3,188 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <title>Flux</title>
+    <title>Flux Pro</title>
     <style>
         :root {
-            --bg-grad: linear-gradient(135deg, #020b18 0%, #001a33 100%);
-            --glass-bg: rgba(20, 40, 70, 0.4);
-            --glass-border: rgba(255, 255, 255, 0.1);
+            --bg: #030812;
+            --panel: rgba(10, 25, 47, 0.7);
             --accent: #007AFF;
+            --glass: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; background: var(--bg-grad); color: white; font-family: -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        
-        /* Glassmorphism */
-        .glass { background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--glass-border); }
-        
-        /* Авторизация */
-        #auth-screen { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; background: var(--bg-grad); }
-        .auth-card { width: 100%; max-width: 320px; padding: 30px 20px; border-radius: 24px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .auth-card input { width: 100%; padding: 14px; margin-bottom: 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.2); color: white; font-size: 16px; outline: none; }
-        .auth-card input::placeholder { color: rgba(255,255,255,0.4); }
-        .btn { width: 100%; padding: 14px; border-radius: 12px; border: none; background: var(--accent); color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-bottom: 10px; }
-        .btn:active { transform: scale(0.96); opacity: 0.8; }
-        .toggle-auth { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+        body { margin: 0; background: var(--bg); color: white; font-family: -apple-system, system-ui, sans-serif; height: 100vh; display: flex; overflow: hidden; }
 
-        /* Основной интерфейс */
-        #app { display: none; flex-direction: column; height: 100%; }
-        .header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--glass-border); z-index: 10; }
-        .header-title { font-weight: bold; font-size: 18px; }
-        
-        #msgs { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 15px; }
-        .msg-wrap { display: flex; gap: 10px; max-width: 90%; }
-        .my-msg { align-self: flex-end; flex-direction: row-reverse; }
-        .avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,0.1); }
-        .msg-bubble { padding: 12px 16px; border-radius: 18px; position: relative; font-size: 15px; line-height: 1.4; word-wrap: break-word; }
-        .my-msg .msg-bubble { background: var(--accent); border-bottom-right-radius: 4px; }
-        .other-msg .msg-bubble { background: var(--glass-bg); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
-        
-        .msg-info { font-size: 11px; opacity: 0.5; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
-        .my-msg .msg-info { justify-content: flex-end; }
-        
-        /* Синяя галочка */
-        .badge { width: 14px; height: 14px; background: #00A3FF; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; }
-        .badge::after { content: '✓'; color: white; font-size: 9px; font-weight: bold; }
+        /* Sidebar */
+        #sidebar { width: 320px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; backdrop-filter: blur(20px); }
+        .sb-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .chat-list { flex: 1; overflow-y: auto; }
+        .chat-item { padding: 15px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); transition: 0.2s; }
+        .chat-item:hover { background: var(--glass); }
+        .chat-item.active { background: rgba(0, 122, 255, 0.15); border-left: 4px solid var(--accent); }
+        .chat-icon { width: 50px; height: 50px; border-radius: 16px; background: linear-gradient(45deg, #004e92, #000428); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; }
 
-        /* Реакции */
-        .react-btn { position: absolute; bottom: -10px; right: 10px; background: rgba(0,0,0,0.6); border: 1px solid var(--glass-border); border-radius: 12px; padding: 2px 8px; font-size: 12px; color: white; cursor: pointer; display: flex; gap: 4px; align-items: center; }
-        .my-msg .react-btn { left: 10px; right: auto; }
+        /* Main Area */
+        #main { flex: 1; display: flex; flex-direction: column; background: radial-gradient(circle at top right, #0a192f, #030812); }
+        .top-bar { padding: 12px 20px; background: var(--panel); backdrop-filter: blur(10px); display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border); }
+        #msgs { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 
-        /* Ввод */
-        .input-area { padding: 10px 15px calc(15px + env(safe-area-inset-bottom)); display: flex; gap: 10px; border-top: 1px solid var(--glass-border); }
-        .input-area input { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); padding: 12px 18px; border-radius: 20px; color: white; font-size: 16px; outline: none; }
-        .send-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); border: none; color: white; font-size: 18px; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        /* Bubbles */
+        .bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; position: relative; font-size: 15px; line-height: 1.4; animation: fadeIn 0.3s ease; }
+        .my { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(0,122,255,0.3); }
+        .other { align-self: flex-start; background: var(--glass); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+        .sender-name { font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; color: #8ebfff; }
+        .badge { width: 14px; height: 14px; background: var(--accent); border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; font-size: 9px; color: white; }
+
+        /* Input */
+        .input-box { padding: 15px 20px calc(15px + env(safe-area-inset-bottom)); background: var(--panel); display: flex; gap: 12px; border-top: 1px solid var(--border); }
+        input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); padding: 12px 18px; border-radius: 14px; color: white; font-size: 16px; outline: none; }
+        .send-btn { width: 45px; height: 45px; border-radius: 14px; background: var(--accent); border: none; color: white; font-size: 20px; cursor: pointer; transition: 0.2s; }
         .send-btn:active { transform: scale(0.9); }
+
+        /* Profile Modal */
+        #profile-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 20px; }
+        .modal-card { width: 100%; max-width: 350px; background: #0a192f; border: 1px solid var(--border); border-radius: 24px; padding: 25px; text-align: center; }
+        .modal-ava { width: 100px; height: 100px; border-radius: 30%; object-fit: cover; margin-bottom: 15px; border: 2px solid var(--accent); }
+
+        /* Auth */
+        #auth { position: fixed; inset: 0; background: var(--bg); z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .auth-card { width: 100%; max-width: 320px; text-align: center; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @media (max-width: 768px) { #sidebar { width: 85px; } .sb-text, .sb-header b { display: none; } }
     </style>
 </head>
 <body>
 
-<div id="auth-screen">
-    <div class="auth-card glass">
-        <h1 style="margin: 0 0 20px 0; font-size: 2.5rem; letter-spacing: -1px;">FLUX</h1>
-        
-        <div id="reg-fields" style="display: none;">
-            <input type="text" id="r-nick" placeholder="Никнейм">
-            <input type="url" id="r-ava" placeholder="Ссылка на аватарку (URL)">
+<div id="auth">
+    <div class="auth-card">
+        <h1 style="font-size: 3rem; margin-bottom: 20px; color: var(--accent);">FLUX</h1>
+        <div id="reg-form" style="display:none">
+            <input type="text" id="r-nick" placeholder="Ваше имя">
+            <input type="text" id="r-ava" placeholder="Ссылка на фото">
         </div>
-        
-        <input type="email" id="email" placeholder="Email (например: user@flux.com)">
-        <input type="password" id="pass" placeholder="Пароль">
-        
-        <button class="btn" id="main-btn" onclick="submitAuth(false)">Войти</button>
-        <button class="btn toggle-auth" onclick="toggleMode()">Создать аккаунт</button>
+        <input type="email" id="l-email" placeholder="Email">
+        <input type="password" id="l-pass" placeholder="Пароль">
+        <button class="send-btn" style="width:100%; margin-top:10px;" onclick="doAuth()">Войти</button>
+        <p onclick="this.parentElement.querySelector('#reg-form').style.display='block'" style="font-size:13px; opacity:0.5; margin-top:15px; cursor:pointer">Нет аккаунта? Регистрация</p>
     </div>
 </div>
 
-<div id="app">
-    <div class="header glass">
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <div class="header-title"># Flux Community</div>
-        </div>
-        <img id="my-avatar" class="avatar" src="" onclick="alert('Меню профиля в разработке')">
+<div id="profile-modal" onclick="if(event.target===this) this.style.display='none'">
+    <div class="modal-card">
+        <img id="p-ava-img" class="modal-ava" src="">
+        <h2 id="p-nick" style="margin: 0;"></h2>
+        <div id="p-uname" style="color:var(--accent); margin-bottom:15px;"></div>
+        <textarea id="p-bio" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid var(--border); color:white; border-radius:10px; padding:10px; margin-bottom:15px;"></textarea>
+        <input type="text" id="p-ava-input" placeholder="Новая ссылка на фото" style="margin-bottom:15px;">
+        <button class="send-btn" style="width:100%" onclick="saveProfile()">Сохранить</button>
     </div>
-    
+</div>
+
+<div id="sidebar">
+    <div class="sb-header">
+        <b>Flux</b>
+        <img id="my-mini-ava" src="" style="width:35px; height:35px; border-radius:10px; cursor:pointer" onclick="openProfile()">
+    </div>
+    <div class="chat-list" id="chat-list"></div>
+    <div style="padding:15px">
+        <button class="send-btn" style="width:100%" onclick="createGroup()">+ Создать группу</button>
+    </div>
+</div>
+
+<div id="main">
+    <div class="top-bar">
+        <div class="chat-icon" id="curr-chat-icon" style="width:40px; height:40px; border-radius:12px;">F</div>
+        <div>
+            <div id="curr-chat-name" style="font-weight:bold">Flux Community</div>
+            <div style="font-size:11px; opacity:0.5">Общий чат для всех</div>
+        </div>
+    </div>
     <div id="msgs"></div>
-    
-    <div class="input-area glass">
-        <button class="send-btn" style="background: var(--glass-bg); border: 1px solid var(--glass-border);" onclick="alert('Каналы и ЛС скоро будут доступны!')">➕</button>
-        <input type="text" id="mt" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
+    <div class="input-box">
+        <input type="text" id="m-text" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') send()">
         <button class="send-btn" onclick="send()">➤</button>
     </div>
 </div>
 
 <script>
     let me = null;
-    let isReg = false;
-    let lastCount = 0;
+    let currentChat = 'community';
 
-    function toggleMode() {
-        isReg = !isReg;
-        document.getElementById('reg-fields').style.display = isReg ? 'block' : 'none';
-        document.getElementById('main-btn').innerText = isReg ? 'Зарегистрироваться' : 'Войти';
+    async function doAuth() {
+        const isReg = document.getElementById('reg-form').style.display === 'block';
+        const body = {
+            action: isReg ? 'register' : 'login',
+            email: document.getElementById('l-email').value,
+            password: document.getElementById('l-pass').value,
+            nick: document.getElementById('r-nick').value,
+            avatar: document.getElementById('r-ava').value || 'https://img.icons8.com/glassmorphism/96/user.png'
+        };
+        const r = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+        const d = await r.json();
+        if(d.status === 'ok') {
+            me = d.user;
+            document.getElementById('auth').style.display = 'none';
+            document.getElementById('my-mini-ava').src = me.avatar;
+            init();
+        } else { alert(d.msg); }
     }
 
-    async function submitAuth() {
-        const email = document.getElementById('email').value;
-        const pass = document.getElementById('pass').value;
-        const payload = { action: isReg ? 'register' : 'login', email, password: pass };
-        
-        if (isReg) {
-            payload.nick = document.getElementById('r-nick').value;
-            payload.avatar = document.getElementById('r-ava').value || 'https://img.icons8.com/glassmorphism/96/user.png';
-        }
+    function openProfile() {
+        document.getElementById('p-ava-img').src = me.avatar;
+        document.getElementById('p-nick').innerText = me.nick;
+        document.getElementById('p-uname').innerText = me.username;
+        document.getElementById('p-bio').value = me.bio || 'Без описания';
+        document.getElementById('profile-modal').style.display = 'flex';
+    }
 
-        const res = await fetch('/api/auth', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+    async function saveProfile() {
+        const newBio = document.getElementById('p-bio').value;
+        const newAva = document.getElementById('p-ava-input').value || me.avatar;
+        await fetch('/api/profile', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ nick: me.nick, bio: newBio, avatar: newAva }) });
+        me.bio = newBio; me.avatar = newAva;
+        document.getElementById('my-mini-ava').src = me.avatar;
+        document.getElementById('profile-modal').style.display = 'none';
+    }
+
+    async function loadChats() {
+        const r = await fetch('/api/chats');
+        const chats = await r.json();
+        const list = document.getElementById('chat-list');
+        list.innerHTML = '';
+        chats.forEach(c => {
+            const el = document.createElement('div');
+            el.className = `chat-item ${currentChat === c.id ? 'active' : ''}`;
+            el.onclick = () => { currentChat = c.id; document.getElementById('curr-chat-name').innerText = c.name; document.getElementById('curr-chat-icon').innerText = c.name[0]; loadChats(); loadMsgs(); };
+            el.innerHTML = `<div class="chat-icon">${c.name[0]}</div><div class="sb-text"><b>${c.name}</b><br><small style="opacity:0.5">${c.type}</small></div>`;
+            list.appendChild(el);
         });
-        const data = await res.json();
-        
-        if(data.status === 'ok') {
-            me = data.user;
-            document.getElementById('my-avatar').src = me.avatar;
-            document.getElementById('auth-screen').style.display = 'none';
-            document.getElementById('app').style.display = 'flex';
-            startChat();
-        } else {
-            alert(data.msg);
-        }
     }
 
     async function loadMsgs() {
-        const res = await fetch('/api/messages?chat_id=community');
-        const msgs = await res.json();
-        if(msgs.length !== lastCount) {
-            const container = document.getElementById('msgs');
-            container.innerHTML = '';
-            msgs.forEach(renderMsg);
-            container.scrollTop = container.scrollHeight;
-            lastCount = msgs.length;
-        }
-    }
-
-    function renderMsg(m) {
-        const isMe = m.sender === me.nick;
-        const badge = m.is_v ? '<div class="badge"></div>' : '';
-        const reactHTML = m.likes > 0 ? `<div class="react-btn" onclick="react(${m.id})">❤️ ${m.likes}</div>` : `<div class="react-btn" style="opacity:0.3" onclick="react(${m.id})">🤍</div>`;
-        
-        const html = `
-            <div class="msg-wrap ${isMe ? 'my-msg' : 'other-msg'}">
-                <img class="avatar" src="${m.avatar}">
-                <div style="max-width: 75%;">
-                    <div class="msg-info"><b>${m.sender}</b> ${badge} • ${m.time}</div>
-                    <div class="msg-bubble">
-                        ${m.text}
-                        ${reactHTML}
+        const r = await fetch(`/api/messages?chat_id=${currentChat}`);
+        const msgs = await r.json();
+        const cont = document.getElementById('msgs');
+        cont.innerHTML = '';
+        msgs.forEach(m => {
+            const isMe = m.sender === me.nick;
+            cont.innerHTML += `
+                <div class="bubble ${isMe ? 'my' : 'other'}">
+                    <div class="sender-name">
+                        <img src="${m.avatar}" style="width:18px; height:18px; border-radius:50%">
+                        ${m.sender} ${m.is_v ? '<span class="badge">✓</span>' : ''}
                     </div>
-                </div>
-            </div>`;
-        document.getElementById('msgs').innerHTML += html;
+                    <div>${m.text}</div>
+                    <div style="font-size:10px; opacity:0.6; text-align:right; margin-top:4px">${m.time}</div>
+                </div>`;
+        });
+        cont.scrollTop = cont.scrollHeight;
     }
 
     async function send() {
-        const input = document.getElementById('mt');
-        if(!input.value.trim()) return;
-        await fetch('/api/messages', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ sender: me.nick, text: input.value, chat_id: 'community' })
-        });
-        input.value = '';
+        const t = document.getElementById('m-text');
+        if(!t.value.trim()) return;
+        await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ chat_id: currentChat, sender: me.nick, text: t.value }) });
+        t.value = '';
         loadMsgs();
     }
 
-    async function react(msg_id) {
-        await fetch('/api/react', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ msg_id })
-        });
-        loadMsgs();
+    function createGroup() {
+        const name = prompt("Название группы:");
+        if(name) fetch('/api/chats', { method:'POST', headers:{'Content-Type':'application/json'}, 
+            body: JSON.stringify({ name, type:'group', owner: me.nick }) }).then(() => loadChats());
     }
 
-    function startChat() {
-        loadMsgs();
-        setInterval(loadMsgs, 2000); // Опрос сервера каждые 2 секунды
-    }
+    function init() { loadChats(); loadMsgs(); setInterval(loadMsgs, 2500); }
 </script>
 </body>
 </html>
