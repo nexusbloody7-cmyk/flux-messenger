@@ -1,136 +1,593 @@
-import os, sqlite3, uuid
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template
+import os, json, time, hashlib, secrets, re
+from flask import Flask, request, jsonify, send_from_directory, session
+from flask_cors import CORS
+from datetime import timedelta
+from functools import wraps
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'flux_v12_fixed_names'
+app = Flask(__name__, static_folder='static')
+app.secret_key = os.environ.get('SECRET_KEY', 'flux_super_secret_key_2025_bloody')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+CORS(app, supports_credentials=True)
 
-def get_db():
-    conn = sqlite3.connect('flux_v8_final.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+# ─────────────────────────────────────────────
+# JSON хранилище — папка data/ рядом с app.py
+# ─────────────────────────────────────────────
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
 
-def init_db():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS users (nick TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT, avatar TEXT, bio TEXT, is_v INTEGER, is_banned INTEGER DEFAULT 0)")
-    cur.execute("CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, name TEXT, type TEXT, owner TEXT, participants TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, sender TEXT, text TEXT, time TEXT, is_v INTEGER, avatar TEXT)")
-    
-    cur.execute("""INSERT OR IGNORE INTO users (nick, username, email, password, avatar, bio, is_v, is_banned) 
-                   VALUES ('bloody', '@bloody', 'nexusbloody7@gmail.com', 'Zavoz7152', 
-                   'https://img.icons8.com/fluency/96/user-male-circle.png', 'Основатель Flux Messenger.', 1, 0)""")
-    cur.execute("INSERT OR IGNORE INTO chats VALUES ('community', 'Flux Community', 'public', 'system', NULL)")
-    conn.commit()
-    conn.close()
+def _path(name):
+    return os.path.join(DATA_DIR, f'{name}.json')
 
-init_db()
+def load(name):
+    p = _path(name)
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {}
 
-@app.route('/')
-def index(): return render_template('index.html')
+def save(name, data):
+    with open(_path(name), 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-@app.route('/api/auth', methods=['POST'])
-def auth():
-    d = request.json
-    conn = get_db()
-    u = conn.execute("SELECT * FROM users WHERE email=? AND password=?", (d['email'], d['password'])).fetchone()
-    if d.get('action') == 'register':
-        if d['nick'].lower() == 'bloody': return jsonify({"status": "error", "msg": "Занято!"})
-        check = conn.execute("SELECT nick FROM users WHERE nick=? OR email=?", (d['nick'], d['email'])).fetchone()
-        if check: return jsonify({"status": "error", "msg": "Занято!"})
-        ava = d.get('avatar') or "https://img.icons8.com/glassmorphism/96/user.png"
-        uname = "@" + d['nick'].lower().replace(" ", "")
-        conn.execute("INSERT INTO users (nick, username, email, password, avatar, bio, is_v, is_banned) VALUES (?, ?, ?, ?, ?, ?, 0, 0)", (d['nick'], uname, d['email'], d['password'], ava, 'Новый пользователь'))
-        conn.commit()
-        return jsonify({"status": "ok", "user": {"nick": d['nick'], "username": uname, "avatar": ava, "is_v": 0}})
+# ─────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────
+def hash_pass(p):
+    return hashlib.sha256((p + 'flux_salt_2025').encode()).hexdigest()
+
+def gen_id():
+    return secrets.token_hex(10)
+
+def now_ms():
+    return int(time.time() * 1000)
+
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        uid = session.get('user_id')
+        users = load('users')
+        u = users.get(uid)
+        if not u:
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(u, *args, **kwargs)
+    return wrap
+
+def is_online(u):
+    return u.get('online') and (now_ms() - u.get('last_seen', 0) < 15000)
+
+def _is_chat_admin(user, chat):
+    return (user['role'] in ('admin', 'creator') or
+            user['id'] in chat.get('admins', []) or
+            user['id'] == chat.get('creator_id'))
+
+def _sys_msg(chat_id, text):
+    msgs = load('messages')
+    msgs.setdefault(chat_id, [])
+    msgs[chat_id].append({
+        'id': gen_id(), 'chat_id': chat_id,
+        'sender_id': None, 'sender_nick': None,
+        'text': text, 'system': True, 'timestamp': now_ms(),
+    })
+    save('messages', msgs)
+
+# ─────────────────────────────────────────────
+# SEED
+# ─────────────────────────────────────────────
+def seed():
+    users = load('users')
+    if 'creator_bloody' not in users:
+        users['creator_bloody'] = {
+            'id': 'creator_bloody',
+            'email': 'nexusbloody7@gmail.com',
+            'username': 'bloody',
+            'nick': 'bloody',
+            'password': hash_pass('Zavoz7152'),
+            'role': 'creator',
+            'avatar': None,
+            'banned': False,
+            'muted': False,
+            'online': False,
+            'last_seen': now_ms(),
+            'created_at': now_ms(),
+        }
+        save('users', users)
+
+    chats = load('chats')
+    if 'community' not in chats:
+        chats['community'] = {
+            'id': 'community',
+            'type': 'group',
+            'name': 'Flux Community',
+            'description': 'Глобальный чат для всех',
+            'icon': '⚡',
+            'creator_id': 'creator_bloody',
+            'pinned': True,
+            'members': ['creator_bloody'],
+            'admins': ['creator_bloody'],
+            'created_at': now_ms(),
+        }
+        save('chats', chats)
+        msgs = load('messages')
+        msgs['community'] = [{
+            'id': gen_id(), 'chat_id': 'community',
+            'sender_id': 'creator_bloody', 'sender_nick': 'bloody',
+            'text': '⚡ Добро пожаловать в Flux Community!',
+            'system': False, 'timestamp': now_ms(),
+        }]
+        save('messages', msgs)
+
+# ─────────────────────────────────────────────
+# AUTH
+# ─────────────────────────────────────────────
+@app.route('/api/register', methods=['POST'])
+def register():
+    d = request.json or {}
+    email    = d.get('email', '').strip().lower()
+    nick     = d.get('nick', '').strip()
+    username = re.sub(r'[^a-z0-9_]', '', d.get('username', '').strip().lower())
+    password = d.get('password', '')
+
+    if not all([email, nick, username, password]):
+        return jsonify({'error': 'Заполните все поля'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'Пароль минимум 6 символов'}), 400
+    if len(username) < 3:
+        return jsonify({'error': 'Username минимум 3 символа'}), 400
+
+    users = load('users')
+    if any(u['email'] == email for u in users.values()):
+        return jsonify({'error': 'Email уже занят'}), 400
+    if any(u['username'] == username for u in users.values()):
+        return jsonify({'error': 'Username уже занят'}), 400
+
+    uid = gen_id()
+    users[uid] = {
+        'id': uid, 'email': email, 'username': username, 'nick': nick,
+        'password': hash_pass(password), 'role': 'user',
+        'avatar': None, 'banned': False, 'muted': False,
+        'online': True, 'last_seen': now_ms(), 'created_at': now_ms(),
+    }
+    save('users', users)
+
+    chats = load('chats')
+    if 'community' in chats and uid not in chats['community']['members']:
+        chats['community']['members'].append(uid)
+        save('chats', chats)
+        _sys_msg('community', f'👋 @{username} присоединился к Flux Community!')
+
+    session.permanent = True
+    session['user_id'] = uid
+    out = users[uid].copy(); out.pop('password', None)
+    return jsonify({'ok': True, 'user': out})
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    d = request.json or {}
+    email    = d.get('email', '').strip().lower()
+    password = d.get('password', '')
+
+    users = load('users')
+    u = next((v for v in users.values() if v['email'] == email), None)
+    if not u:
+        return jsonify({'error': 'Аккаунт не найден'}), 400
+    if u.get('banned'):
+        return jsonify({'error': 'Аккаунт заблокирован'}), 403
+    if u['password'] != hash_pass(password):
+        return jsonify({'error': 'Неверный пароль'}), 400
+
+    u['online'] = True
+    u['last_seen'] = now_ms()
+
+    chats = load('chats')
+    if 'community' in chats and u['id'] not in chats['community']['members']:
+        chats['community']['members'].append(u['id'])
+        save('chats', chats)
+
+    save('users', users)
+    session.permanent = True
+    session['user_id'] = u['id']
+    out = u.copy(); out.pop('password', None)
+    return jsonify({'ok': True, 'user': out})
+
+
+@app.route('/api/logout', methods=['POST'])
+@login_required
+def logout(me):
+    users = load('users')
+    if me['id'] in users:
+        users[me['id']]['online'] = False
+        users[me['id']]['last_seen'] = now_ms()
+        save('users', users)
+    session.clear()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/me', methods=['GET'])
+@login_required
+def get_me(me):
+    users = load('users')
+    u = users.get(me['id'], me)
+    u['online'] = True; u['last_seen'] = now_ms()
+    save('users', users)
+    out = u.copy(); out.pop('password', None)
+    return jsonify(out)
+
+
+@app.route('/api/users/heartbeat', methods=['POST'])
+@login_required
+def heartbeat(me):
+    users = load('users')
+    if me['id'] in users:
+        users[me['id']]['online'] = True
+        users[me['id']]['last_seen'] = now_ms()
+        save('users', users)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/users', methods=['GET'])
+@login_required
+def get_users(me):
+    users = load('users')
+    result = []
+    for u in users.values():
+        if u['id'] == me['id']:
+            continue
+        out = u.copy(); out.pop('password', None)
+        out['online'] = is_online(u)
+        result.append(out)
+    return jsonify(result)
+
+
+@app.route('/api/users/<uid>', methods=['GET'])
+@login_required
+def get_user(me, uid):
+    users = load('users')
+    u = users.get(uid)
+    if not u:
+        return jsonify({'error': 'Not found'}), 404
+    out = u.copy(); out.pop('password', None)
+    out['online'] = is_online(u)
+    return jsonify(out)
+
+
+@app.route('/api/users/me/profile', methods=['PUT'])
+@login_required
+def update_profile(me):
+    d = request.json or {}
+    nick     = d.get('nick', '').strip()
+    username = re.sub(r'[^a-z0-9_]', '', d.get('username', '').strip().lower())
+    avatar   = d.get('avatar')
+
+    if not nick or not username:
+        return jsonify({'error': 'Заполните поля'}), 400
+
+    users = load('users')
+    if any(u['username'] == username and u['id'] != me['id'] for u in users.values()):
+        return jsonify({'error': 'Username занят'}), 400
+
+    users[me['id']]['nick']     = nick
+    users[me['id']]['username'] = username
+    if avatar is not None:
+        users[me['id']]['avatar'] = avatar
+    save('users', users)
+
+    out = users[me['id']].copy(); out.pop('password', None)
+    return jsonify(out)
+
+
+# ─────────────────────────────────────────────
+# ADMIN
+# ─────────────────────────────────────────────
+@app.route('/api/admin/users/<uid>/action', methods=['POST'])
+@login_required
+def admin_action(me, uid):
+    if me['role'] not in ('admin', 'creator'):
+        return jsonify({'error': 'Forbidden'}), 403
+    users = load('users')
+    target = users.get(uid)
+    if not target:
+        return jsonify({'error': 'Not found'}), 404
+    if target['role'] == 'creator' and me['role'] != 'creator':
+        return jsonify({'error': 'Cannot modify creator'}), 403
+
+    d = request.json or {}
+    action = d.get('action')
+
+    if action == 'ban':      target['banned'] = True
+    elif action == 'unban':  target['banned'] = False
+    elif action == 'mute':   target['muted']  = True
+    elif action == 'unmute': target['muted']  = False
+    elif action == 'give_role':
+        role = d.get('role')
+        if role not in ('user', 'admin', 'creator'):
+            return jsonify({'error': 'Invalid role'}), 400
+        if role == 'creator' and me['role'] != 'creator':
+            return jsonify({'error': 'Only creator can grant creator role'}), 403
+        target['role'] = role
     else:
-        if u and not u['is_banned']: return jsonify({"status": "ok", "user": dict(u)})
-        return jsonify({"status": "error", "msg": "Ошибка входа"})
+        return jsonify({'error': 'Unknown action'}), 400
 
-@app.route('/api/messages', methods=['GET', 'POST'])
-def handle_messages():
-    conn = get_db()
-    if request.method == 'POST':
-        d = request.json
-        sender, text, chat_id = d.get('sender'), d.get('text', '').strip(), d.get('chat_id')
-        u = conn.execute("SELECT is_v, avatar, is_banned FROM users WHERE nick=?", (sender,)).fetchone()
-        if not u or u['is_banned']: return jsonify({"status": "error"})
+    save('users', users)
+    out = target.copy(); out.pop('password', None)
+    return jsonify({'ok': True, 'user': out})
 
-        chat_info = conn.execute("SELECT owner, participants FROM chats WHERE id=?", (chat_id,)).fetchone()
-        
-        # КОМАНДЫ
-        if text.startswith('/') and (sender == 'bloody' or (chat_info and sender == chat_info['owner'])):
-            if text.startswith('/invite '):
-                target = text.replace('/invite @', '').replace('/invite ', '').strip()
-                current_parts = chat_info['participants'] or sender
-                if target not in current_parts:
-                    new_parts = f"{current_parts},{target}"
-                    conn.execute("UPDATE chats SET participants=? WHERE id=?", (new_parts, chat_id))
-                    conn.commit()
-                    text = f"📢 {target} добавлен в чат."
-            elif sender == 'bloody' and text.startswith('/ban '):
-                t = text.replace('/ban @', '').strip()
-                conn.execute("UPDATE users SET is_banned=1 WHERE nick=?", (t,))
-                conn.commit()
-                text = f"🚫 {t} забанен."
-            elif text == '/clear' and (sender == 'bloody' or sender == chat_info['owner']):
-                conn.execute("DELETE FROM messages WHERE chat_id=?", (chat_id,))
-                conn.commit()
-                text = "🧹 Чат очищен."
 
-        if text:
-            conn.execute("INSERT INTO messages (chat_id, sender, text, time, is_v, avatar) VALUES (?, ?, ?, ?, ?, ?)",
-                         (chat_id, sender, text, datetime.now().strftime('%H:%M'), u['is_v'], u['avatar']))
-            conn.commit()
-        return jsonify({"status": "ok"})
-    
-    msgs = [dict(m) for m in conn.execute("SELECT * FROM messages WHERE chat_id=? ORDER BY id ASC", (request.args.get('chat_id'),)).fetchall()]
-    return jsonify(msgs)
+# ─────────────────────────────────────────────
+# CHATS
+# ─────────────────────────────────────────────
+@app.route('/api/chats', methods=['GET'])
+@login_required
+def get_chats(me):
+    chats = load('chats')
+    result = [c for c in chats.values() if me['id'] in c.get('members', [])]
+    return jsonify(result)
 
-@app.route('/api/chats', methods=['GET', 'POST'])
-def handle_chats():
-    conn = get_db()
-    user_nick = request.args.get('user_nick', '')
-    if request.method == 'POST':
-        d = request.json
-        c_id = "chat_" + str(uuid.uuid4())[:8]
-        if d.get('type') == 'direct':
-            target = d['target'].replace('@', '').strip()
-            p_str = ','.join(sorted([d['owner'], target]))
-            ex = conn.execute("SELECT id FROM chats WHERE participants=?", (p_str,)).fetchone()
-            if ex: return jsonify({"status": "ok", "id": ex['id']})
-            # Для лички ставим имя "Direct", но в GET запросе мы его заменим на ник
-            conn.execute("INSERT INTO chats VALUES (?, ?, 'direct', ?, ?)", (c_id, target, d['owner'], p_str))
-        else:
-            conn.execute("INSERT INTO chats VALUES (?, ?, 'private', ?, ?)", (c_id, d['name'], d['owner'], d['owner']))
-        conn.commit()
-        return jsonify({"status": "ok", "id": c_id})
 
-    all_c = [dict(c) for c in conn.execute("SELECT * FROM chats").fetchall()]
-    res = []
-    for c in all_c:
-        parts = (c['participants'] or '').split(',')
-        if c['id'] == 'community' or user_nick in parts or c['owner'] == user_nick or user_nick == 'bloody':
-            chat_data = dict(c)
-            if c['type'] == 'direct':
-                p = c['participants'].split(',')
-                other = p[1] if p[0] == user_nick else p[0]
-                u_info = conn.execute("SELECT avatar FROM users WHERE nick=?", (other,)).fetchone()
-                # ФИКС undefined: принудительно ставим ник собеседника в имя чата
-                chat_data['name'] = other 
-                chat_data['avatar'] = u_info['avatar'] if u_info else 'https://img.icons8.com/glassmorphism/96/user.png'
-            res.append(chat_data)
-    return jsonify(res)
+@app.route('/api/chats', methods=['POST'])
+@login_required
+def create_chat(me):
+    d = request.json or {}
+    chat_type = d.get('type', 'group')
+    name = d.get('name', '').strip()
+    icon = d.get('icon', '').strip() or ('📢' if chat_type == 'channel' else '👥')
 
-@app.route('/api/profile', methods=['POST'])
-def update_profile():
-    d = request.json
-    conn = get_db()
-    conn.execute("UPDATE users SET bio=?, avatar=? WHERE nick=?", (d['bio'], d['avatar'], d['nick']))
-    conn.commit()
-    return jsonify({"status": "ok"})
+    if not name:
+        return jsonify({'error': 'Укажите название'}), 400
+
+    cid = gen_id()
+    chats = load('chats')
+    chats[cid] = {
+        'id': cid, 'type': chat_type, 'name': name,
+        'description': d.get('description', ''), 'icon': icon,
+        'creator_id': me['id'], 'pinned': False,
+        'members': [me['id']], 'admins': [me['id']],
+        'created_at': now_ms(),
+    }
+    save('chats', chats)
+    _sys_msg(cid, f'{"Канал" if chat_type=="channel" else "Группа"} "{name}" создан(а)')
+    return jsonify(chats[cid])
+
+
+@app.route('/api/chats/dm', methods=['POST'])
+@login_required
+def create_dm(me):
+    d = request.json or {}
+    other_id = d.get('user_id')
+    users = load('users')
+    if other_id not in users:
+        return jsonify({'error': 'User not found'}), 404
+
+    chats = load('chats')
+    for c in chats.values():
+        if c['type'] == 'dm':
+            mems = c.get('members', [])
+            if me['id'] in mems and other_id in mems:
+                return jsonify(c)
+
+    cid = gen_id()
+    chats[cid] = {
+        'id': cid, 'type': 'dm', 'name': None,
+        'description': '', 'icon': '',
+        'creator_id': me['id'], 'pinned': False,
+        'members': [me['id'], other_id], 'admins': [],
+        'created_at': now_ms(),
+    }
+    save('chats', chats)
+    return jsonify(chats[cid])
+
+
+@app.route('/api/chats/<chat_id>', methods=['PUT'])
+@login_required
+def update_chat(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if not _is_chat_admin(me, c):
+        return jsonify({'error': 'Forbidden'}), 403
+    d = request.json or {}
+    for key in ('name', 'description', 'icon'):
+        if key in d: c[key] = d[key]
+    save('chats', chats)
+    return jsonify(c)
+
+
+@app.route('/api/chats/<chat_id>', methods=['DELETE'])
+@login_required
+def delete_chat_route(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if me['role'] not in ('admin', 'creator') and not _is_chat_admin(me, c):
+        return jsonify({'error': 'Forbidden'}), 403
+    del chats[chat_id]
+    save('chats', chats)
+    msgs = load('messages')
+    if chat_id in msgs:
+        del msgs[chat_id]
+        save('messages', msgs)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/chats/<chat_id>/members', methods=['POST'])
+@login_required
+def add_member(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if not _is_chat_admin(me, c):
+        return jsonify({'error': 'Forbidden'}), 403
+    d = request.json or {}
+    uid = d.get('user_id')
+    users = load('users')
+    u = users.get(uid)
+    if not u: return jsonify({'error': 'User not found'}), 404
+    if uid not in c['members']:
+        c['members'].append(uid)
+        save('chats', chats)
+        _sys_msg(chat_id, f'➕ @{u["username"]} добавлен в чат')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/chats/<chat_id>/leave', methods=['POST'])
+@login_required
+def leave_chat(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if me['id'] in c['members']:
+        c['members'].remove(me['id'])
+        save('chats', chats)
+        _sys_msg(chat_id, f'🚪 @{me["username"]} покинул(а) чат')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/chats/<chat_id>/clear', methods=['POST'])
+@login_required
+def clear_chat(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if not _is_chat_admin(me, c):
+        return jsonify({'error': 'Forbidden'}), 403
+    msgs = load('messages')
+    msgs[chat_id] = []
+    save('messages', msgs)
+    return jsonify({'ok': True})
+
+
+# ─────────────────────────────────────────────
+# MESSAGES
+# ─────────────────────────────────────────────
+@app.route('/api/chats/<chat_id>/messages', methods=['GET'])
+@login_required
+def get_messages(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Not found'}), 404
+    if me['id'] not in c.get('members', []):
+        return jsonify({'error': 'Not a member'}), 403
+    since = request.args.get('since', 0, type=int)
+    msgs = load('messages')
+    chat_msgs = msgs.get(chat_id, [])
+    result = [m for m in chat_msgs if m['timestamp'] > since]
+    return jsonify(result)
+
+
+@app.route('/api/chats/<chat_id>/messages', methods=['POST'])
+@login_required
+def send_message(me, chat_id):
+    chats = load('chats')
+    c = chats.get(chat_id)
+    if not c: return jsonify({'error': 'Chat not found'}), 404
+    if me['id'] not in c.get('members', []):
+        return jsonify({'error': 'Not a member'}), 403
+    if c['type'] == 'channel' and not _is_chat_admin(me, c):
+        return jsonify({'error': 'Only admins can post in channels'}), 403
+    if me.get('muted') and me['role'] not in ('admin', 'creator'):
+        return jsonify({'error': 'Вы замьючены'}), 403
+
+    d = request.json or {}
+    text = d.get('text', '').strip()
+    if not text: return jsonify({'error': 'Empty message'}), 400
+
+    if text.startswith('/') and me['role'] in ('admin', 'creator'):
+        return jsonify(_handle_cmd(me, chat_id, text))
+
+    msg = {
+        'id': gen_id(), 'chat_id': chat_id,
+        'sender_id': me['id'], 'sender_nick': me['nick'],
+        'text': text, 'system': False, 'timestamp': now_ms(),
+    }
+    msgs = load('messages')
+    msgs.setdefault(chat_id, [])
+    msgs[chat_id].append(msg)
+    save('messages', msgs)
+    return jsonify(msg)
+
+
+def _handle_cmd(me, chat_id, text):
+    parts = text[1:].split()
+    cmd = parts[0].lower() if parts else ''
+    arg1 = parts[1] if len(parts) > 1 else None
+    arg2 = parts[2] if len(parts) > 2 else None
+    users = load('users')
+
+    def find_user(name):
+        if not name: return None, None
+        n = name.lstrip('@')
+        for uid, u in users.items():
+            if u['username'] == n or u['id'] == n:
+                return uid, u
+        return None, None
+
+    simple = {
+        'ban':    ('banned', True,  '🔨 @{u} заблокирован'),
+        'unban':  ('banned', False, '✅ @{u} разблокирован'),
+        'mute':   ('muted',  True,  '🔇 @{u} замьючен'),
+        'unmute': ('muted',  False, '🔊 @{u} размьючен'),
+    }
+
+    if cmd in simple:
+        uid, target = find_user(arg1)
+        if not target: return {'error': 'Пользователь не найден'}
+        if target['role'] == 'creator' and me['role'] != 'creator':
+            return {'error': 'Нельзя'}
+        field, val, tmpl = simple[cmd]
+        target[field] = val
+        save('users', users)
+        _sys_msg(chat_id, tmpl.replace('{u}', target['username']))
+        return {'ok': True, 'command': cmd}
+
+    if cmd == 'give_role':
+        uid, target = find_user(arg1)
+        role = arg2
+        if not target or not role:
+            return {'error': 'Укажи пользователя и роль'}
+        if role not in ('user', 'admin', 'creator'):
+            return {'error': 'Роли: user, admin, creator'}
+        if role == 'creator' and me['role'] != 'creator':
+            return {'error': 'Только создатель может назначать creator'}
+        target['role'] = role
+        save('users', users)
+        _sys_msg(chat_id, f'👑 @{target["username"]} → роль: {role}')
+        return {'ok': True, 'command': cmd}
+
+    if cmd == 'announce':
+        _sys_msg('community', '📢 Объявление: ' + ' '.join(parts[1:]))
+        return {'ok': True, 'command': cmd}
+
+    if cmd == 'delete_chat':
+        cid = arg1 or chat_id
+        chats = load('chats')
+        if cid in chats:
+            del chats[cid]; save('chats', chats)
+        msgs_d = load('messages')
+        if cid in msgs_d:
+            del msgs_d[cid]; save('messages', msgs_d)
+        return {'ok': True, 'command': cmd, 'deleted_chat': cid}
+
+    return {'error': f'Неизвестная команда: /{cmd}'}
+
+
+# ─────────────────────────────────────────────
+# STATIC
+# ─────────────────────────────────────────────
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    if path and os.path.exists(os.path.join(static_dir, path)):
+        return send_from_directory(static_dir, path)
+    return send_from_directory(static_dir, 'index.html')
+
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    seed()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
