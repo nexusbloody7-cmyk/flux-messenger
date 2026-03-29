@@ -513,15 +513,13 @@ async function loadChatsAndUsers() {
 function startTimers() {
   clearInterval(refreshTimer); clearInterval(heartbeatTimer);
 
-  // Heartbeat — keep online status
   heartbeatTimer = setInterval(() => api('POST', '/users/heartbeat'), 8000);
 
-  // Refresh chats list every 3s
   refreshTimer = setInterval(async () => {
     await loadChatsAndUsers();
     renderChatList(true);
     if (activeChat) await pollMessages();
-  }, 3000);
+  }, 2000);
 }
 
 function renderMyAv() {
@@ -655,11 +653,15 @@ async function loadMessages() {
 
 async function pollMessages() {
   if (!activeChat) return;
-  const res = await api('GET', `/chats/${activeChat}/messages?since=${lastMsgTimestamp}`);
-  if (res.error || !res.length) return;
-  activeChatMessages = activeChatMessages.concat(res);
-  lastMsgTimestamp = res[res.length-1].timestamp;
-  renderMessages();
+  // Всегда тянем ВСЕ сообщения заново — так все видят всё
+  const res = await api('GET', `/chats/${activeChat}/messages?since=0`);
+  if (res.error) return;
+  // Обновляем только если количество изменилось
+  if (res.length !== activeChatMessages.length) {
+    activeChatMessages = res;
+    if (res.length) lastMsgTimestamp = res[res.length-1].timestamp;
+    renderMessages();
+  }
 }
 
 function renderMessages() {

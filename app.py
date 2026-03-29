@@ -78,24 +78,7 @@ def _sys_msg(chat_id, text):
 # SEED
 # ─────────────────────────────────────────────
 def seed():
-    users = load('users')
-    if 'creator_bloody' not in users:
-        users['creator_bloody'] = {
-            'id': 'creator_bloody',
-            'email': 'nexusbloody7@gmail.com',
-            'username': 'bloody',
-            'nick': 'bloody',
-            'password': hash_pass('Zavoz7152'),
-            'role': 'creator',
-            'avatar': None,
-            'banned': False,
-            'muted': False,
-            'online': False,
-            'last_seen': now_ms(),
-            'created_at': now_ms(),
-        }
-        save('users', users)
-
+    # Просто создаём community если нет — без захардкоженного аккаунта
     chats = load('chats')
     if 'community' not in chats:
         chats['community'] = {
@@ -104,21 +87,29 @@ def seed():
             'name': 'Flux Community',
             'description': 'Глобальный чат для всех',
             'icon': '⚡',
-            'creator_id': 'creator_bloody',
+            'creator_id': None,
             'pinned': True,
-            'members': ['creator_bloody'],
-            'admins': ['creator_bloody'],
+            'members': [],
+            'admins': [],
             'created_at': now_ms(),
         }
         save('chats', chats)
         msgs = load('messages')
         msgs['community'] = [{
             'id': gen_id(), 'chat_id': 'community',
-            'sender_id': 'creator_bloody', 'sender_nick': 'bloody',
+            'sender_id': None, 'sender_nick': 'Flux',
             'text': '⚡ Добро пожаловать в Flux Community!',
-            'system': False, 'timestamp': now_ms(),
+            'system': True, 'timestamp': now_ms(),
         }]
         save('messages', msgs)
+
+def get_role_for_username(username):
+    # username bloody — автоматически creator
+    # можно добавить других сюда
+    special = {
+        'bloody': 'creator',
+    }
+    return special.get(username.lower(), 'user')
 
 # ─────────────────────────────────────────────
 # AUTH
@@ -145,9 +136,10 @@ def register():
         return jsonify({'error': 'Username уже занят'}), 400
 
     uid = gen_id()
+    role = get_role_for_username(username)
     users[uid] = {
         'id': uid, 'email': email, 'username': username, 'nick': nick,
-        'password': hash_pass(password), 'role': 'user',
+        'password': hash_pass(password), 'role': role,
         'avatar': None, 'banned': False, 'muted': False,
         'online': True, 'last_seen': now_ms(), 'created_at': now_ms(),
     }
@@ -156,6 +148,10 @@ def register():
     chats = load('chats')
     if 'community' in chats and uid not in chats['community']['members']:
         chats['community']['members'].append(uid)
+        # Если creator — добавляем в admins
+        if role == 'creator':
+            chats['community']['admins'].append(uid)
+            chats['community']['creator_id'] = uid
         save('chats', chats)
         _sys_msg('community', f'👋 @{username} присоединился к Flux Community!')
 
