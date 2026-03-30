@@ -10,9 +10,6 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 CORS(app, supports_credentials=True)
 
-# ─────────────────────────────────────────────
-# JSON хранилище — папка data/ рядом с app.py
-# ─────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -33,9 +30,6 @@ def save(name, data):
     with open(_path(name), 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ─────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────
 def hash_pass(p):
     return hashlib.sha256((p + 'flux_salt_2025').encode()).hexdigest()
 
@@ -74,11 +68,25 @@ def _sys_msg(chat_id, text):
     })
     save('messages', msgs)
 
-# ─────────────────────────────────────────────
-# SEED
-# ─────────────────────────────────────────────
 def seed():
-    # Просто создаём community если нет — без захардкоженного аккаунта
+    users = load('users')
+    if 'creator_bloody' not in users:
+        users['creator_bloody'] = {
+            'id': 'creator_bloody',
+            'email': 'nexusbloody7@gmail.com',
+            'username': 'bloody',
+            'nick': 'bloody',
+            'password': hash_pass('Zavoz7152'),
+            'role': 'creator',
+            'avatar': None,
+            'banned': False,
+            'muted': False,
+            'online': False,
+            'last_seen': now_ms(),
+            'created_at': now_ms(),
+        }
+        save('users', users)
+
     chats = load('chats')
     if 'community' not in chats:
         chats['community'] = {
@@ -87,33 +95,22 @@ def seed():
             'name': 'Flux Community',
             'description': 'Глобальный чат для всех',
             'icon': '⚡',
-            'creator_id': None,
+            'creator_id': 'creator_bloody',
             'pinned': True,
-            'members': [],
-            'admins': [],
+            'members': ['creator_bloody'],
+            'admins': ['creator_bloody'],
             'created_at': now_ms(),
         }
         save('chats', chats)
         msgs = load('messages')
         msgs['community'] = [{
             'id': gen_id(), 'chat_id': 'community',
-            'sender_id': None, 'sender_nick': 'Flux',
+            'sender_id': 'creator_bloody', 'sender_nick': 'bloody',
             'text': '⚡ Добро пожаловать в Flux Community!',
-            'system': True, 'timestamp': now_ms(),
+            'system': False, 'timestamp': now_ms(),
         }]
         save('messages', msgs)
 
-def get_role_for_username(username):
-    # username bloody — автоматически creator
-    # можно добавить других сюда
-    special = {
-        'bloody': 'creator',
-    }
-    return special.get(username.lower(), 'user')
-
-# ─────────────────────────────────────────────
-# AUTH
-# ─────────────────────────────────────────────
 @app.route('/api/register', methods=['POST'])
 def register():
     d = request.json or {}
@@ -136,10 +133,9 @@ def register():
         return jsonify({'error': 'Username уже занят'}), 400
 
     uid = gen_id()
-    role = get_role_for_username(username)
     users[uid] = {
         'id': uid, 'email': email, 'username': username, 'nick': nick,
-        'password': hash_pass(password), 'role': role,
+        'password': hash_pass(password), 'role': 'user',
         'avatar': None, 'banned': False, 'muted': False,
         'online': True, 'last_seen': now_ms(), 'created_at': now_ms(),
     }
@@ -148,10 +144,6 @@ def register():
     chats = load('chats')
     if 'community' in chats and uid not in chats['community']['members']:
         chats['community']['members'].append(uid)
-        # Если creator — добавляем в admins
-        if role == 'creator':
-            chats['community']['admins'].append(uid)
-            chats['community']['creator_id'] = uid
         save('chats', chats)
         _sys_msg('community', f'👋 @{username} присоединился к Flux Community!')
 
@@ -159,7 +151,6 @@ def register():
     session['user_id'] = uid
     out = users[uid].copy(); out.pop('password', None)
     return jsonify({'ok': True, 'user': out})
-
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -190,7 +181,6 @@ def login():
     out = u.copy(); out.pop('password', None)
     return jsonify({'ok': True, 'user': out})
 
-
 @app.route('/api/logout', methods=['POST'])
 @login_required
 def logout(me):
@@ -202,7 +192,6 @@ def logout(me):
     session.clear()
     return jsonify({'ok': True})
 
-
 @app.route('/api/me', methods=['GET'])
 @login_required
 def get_me(me):
@@ -213,7 +202,6 @@ def get_me(me):
     out = u.copy(); out.pop('password', None)
     return jsonify(out)
 
-
 @app.route('/api/users/heartbeat', methods=['POST'])
 @login_required
 def heartbeat(me):
@@ -223,7 +211,6 @@ def heartbeat(me):
         users[me['id']]['last_seen'] = now_ms()
         save('users', users)
     return jsonify({'ok': True})
-
 
 @app.route('/api/users', methods=['GET'])
 @login_required
@@ -238,7 +225,6 @@ def get_users(me):
         result.append(out)
     return jsonify(result)
 
-
 @app.route('/api/users/<uid>', methods=['GET'])
 @login_required
 def get_user(me, uid):
@@ -249,7 +235,6 @@ def get_user(me, uid):
     out = u.copy(); out.pop('password', None)
     out['online'] = is_online(u)
     return jsonify(out)
-
 
 @app.route('/api/users/me/profile', methods=['PUT'])
 @login_required
@@ -275,10 +260,6 @@ def update_profile(me):
     out = users[me['id']].copy(); out.pop('password', None)
     return jsonify(out)
 
-
-# ─────────────────────────────────────────────
-# ADMIN
-# ─────────────────────────────────────────────
 @app.route('/api/admin/users/<uid>/action', methods=['POST'])
 @login_required
 def admin_action(me, uid):
@@ -312,17 +293,12 @@ def admin_action(me, uid):
     out = target.copy(); out.pop('password', None)
     return jsonify({'ok': True, 'user': out})
 
-
-# ─────────────────────────────────────────────
-# CHATS
-# ─────────────────────────────────────────────
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats(me):
     chats = load('chats')
     result = [c for c in chats.values() if me['id'] in c.get('members', [])]
     return jsonify(result)
-
 
 @app.route('/api/chats', methods=['POST'])
 @login_required
@@ -347,7 +323,6 @@ def create_chat(me):
     save('chats', chats)
     _sys_msg(cid, f'{"Канал" if chat_type=="channel" else "Группа"} "{name}" создан(а)')
     return jsonify(chats[cid])
-
 
 @app.route('/api/chats/dm', methods=['POST'])
 @login_required
@@ -376,7 +351,6 @@ def create_dm(me):
     save('chats', chats)
     return jsonify(chats[cid])
 
-
 @app.route('/api/chats/<chat_id>', methods=['PUT'])
 @login_required
 def update_chat(me, chat_id):
@@ -390,7 +364,6 @@ def update_chat(me, chat_id):
         if key in d: c[key] = d[key]
     save('chats', chats)
     return jsonify(c)
-
 
 @app.route('/api/chats/<chat_id>', methods=['DELETE'])
 @login_required
@@ -407,7 +380,6 @@ def delete_chat_route(me, chat_id):
         del msgs[chat_id]
         save('messages', msgs)
     return jsonify({'ok': True})
-
 
 @app.route('/api/chats/<chat_id>/members', methods=['POST'])
 @login_required
@@ -428,7 +400,6 @@ def add_member(me, chat_id):
         _sys_msg(chat_id, f'➕ @{u["username"]} добавлен в чат')
     return jsonify({'ok': True})
 
-
 @app.route('/api/chats/<chat_id>/leave', methods=['POST'])
 @login_required
 def leave_chat(me, chat_id):
@@ -440,7 +411,6 @@ def leave_chat(me, chat_id):
         save('chats', chats)
         _sys_msg(chat_id, f'🚪 @{me["username"]} покинул(а) чат')
     return jsonify({'ok': True})
-
 
 @app.route('/api/chats/<chat_id>/clear', methods=['POST'])
 @login_required
@@ -455,10 +425,6 @@ def clear_chat(me, chat_id):
     save('messages', msgs)
     return jsonify({'ok': True})
 
-
-# ─────────────────────────────────────────────
-# MESSAGES
-# ─────────────────────────────────────────────
 @app.route('/api/chats/<chat_id>/messages', methods=['GET'])
 @login_required
 def get_messages(me, chat_id):
@@ -472,7 +438,6 @@ def get_messages(me, chat_id):
     chat_msgs = msgs.get(chat_id, [])
     result = [m for m in chat_msgs if m['timestamp'] > since]
     return jsonify(result)
-
 
 @app.route('/api/chats/<chat_id>/messages', methods=['POST'])
 @login_required
@@ -504,7 +469,6 @@ def send_message(me, chat_id):
     msgs[chat_id].append(msg)
     save('messages', msgs)
     return jsonify(msg)
-
 
 def _handle_cmd(me, chat_id, text):
     parts = text[1:].split()
@@ -569,10 +533,6 @@ def _handle_cmd(me, chat_id, text):
 
     return {'error': f'Неизвестная команда: /{cmd}'}
 
-
-# ─────────────────────────────────────────────
-# STATIC
-# ─────────────────────────────────────────────
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
@@ -580,7 +540,6 @@ def serve(path):
     if path and os.path.exists(os.path.join(static_dir, path)):
         return send_from_directory(static_dir, path)
     return send_from_directory(static_dir, 'index.html')
-
 
 if __name__ == '__main__':
     seed()
