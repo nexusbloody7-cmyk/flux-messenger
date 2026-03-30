@@ -398,8 +398,25 @@ def handle_cmd(me, cid, text):
         return {'ok':True,'command':cmd,'deleted_chat':target}
     return {'error':f'Неизвестная команда: /{cmd}'}
 
-@app.route('/', defaults={'path':''})
-@app.route('/<path:path>')
+@app.route('/api/reset-bloody-account')
+def reset_bloody():
+    users = load('users')
+    # Удаляем все аккаунты с username bloody
+    to_delete = [uid for uid,u in users.items() if u.get('username')=='bloody']
+    for uid in to_delete:
+        del users[uid]
+    save('users', users)
+    # Убираем bloody из всех чатов
+    chats = load('chats')
+    for c in chats.values():
+        c['members'] = [m for m in c.get('members',[]) if m not in to_delete]
+        c['admins']  = [m for m in c.get('admins',[])  if m not in to_delete]
+        if c.get('creator_id') in to_delete:
+            c['creator_id'] = None
+    save('chats', chats)
+    return jsonify({'ok': True, 'deleted': to_delete})
+
+
 def serve(path):
     sd = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
     if path and os.path.exists(os.path.join(sd,path)): return send_from_directory(sd,path)
