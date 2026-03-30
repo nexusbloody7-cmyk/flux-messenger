@@ -841,21 +841,95 @@ async function showUserProfile(userId) {
     </div>`;
   }
 
+  const fluxIdBlock = u.flux_id ? `
+    <div style="margin-top:10px;padding:10px 14px;background:rgba(41,121,212,.08);border:1px solid rgba(74,156,248,.15);border-radius:12px;text-align:center;">
+      <div style="font-size:10px;color:var(--text-muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;">Flux ID</div>
+      <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--blue-300);">⚡ ${u.flux_id}</div>
+    </div>` : '';
+
+  const linkedServices = (u.linked_services||[]).length > 0 ? `
+    <div style="margin-top:10px;">
+      <div style="font-size:11px;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">Привязанные сервисы</div>
+      ${(u.linked_services||[]).map(s => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(74,156,248,.1);border-radius:10px;margin-bottom:6px;">
+          <span style="font-size:18px;">${serviceIcon(s.service)}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;">${esc(s.service)}</div>
+            <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.value)}</div>
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
+  const linkBtn = u.id === me.id ? `
+    <button class="modal-btn secondary" style="margin-top:8px;" onclick="closeModal();showLinkService()">🔗 Привязать сервис</button>` : '';
+
   showModal(`<div style="padding:0 4px;">
     <div class="ps-av">${avatarHtml(u, 88, '50%')}</div>
     <div class="ps-name">${esc(u.nick)}${u.role==='creator'?'<span class="verified-badge">✓</span>':''}</div>
     <div class="ps-handle">@${u.username}</div>
     <div style="text-align:center;"><span class="ps-role">${roleLabels[u.role]||'Пользователь'}</span></div>
+    ${fluxIdBlock}
     <div class="online-row" style="justify-content:center;margin-top:10px;">
       <span class="dot ${isOn?'on':'off'}"></span>
       <span>${isOn ? 'В сети' : 'Был(а) '+fmtTime(u.last_seen)}</span>
     </div>
+    ${linkedServices}
     <div class="ps-actions">${actBtns}</div>
+    ${linkBtn}
     ${adminSec}
   </div>`);
 }
 
-async function adminUserAction(userId, action) {
+function serviceIcon(s) {
+  const icons = { telegram:'✈️', instagram:'📸', youtube:'▶️', tiktok:'🎵', twitter:'🐦', discord:'💬', github:'💻', vk:'💙', twitch:'🎮', spotify:'🎧' };
+  return icons[s.toLowerCase()] || '🔗';
+}
+
+function showLinkService() {
+  const services = ['Telegram','Instagram','YouTube','TikTok','Twitter','Discord','GitHub','VK','Twitch','Spotify'];
+  const current = me.linked_services || [];
+  showModal(`<div class="modal-header"><div class="modal-title">🔗 Привязать сервис</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-form">
+    <div>
+      <div class="modal-lbl">Сервис</div>
+      <select class="modal-input" id="ls-service" style="background:rgba(255,255,255,.06);color:var(--text-primary);">
+        ${services.map(s => `<option value="${s}" style="background:#0d1f3f;">${serviceIcon(s.toLowerCase())} ${s}</option>`).join('')}
+      </select>
+    </div>
+    <div><div class="modal-lbl">Ссылка или никнейм</div><input class="modal-input" id="ls-value" placeholder="https://... или @username"></div>
+    <button class="modal-btn" onclick="doLinkService()">Привязать ✅</button>
+    ${current.length > 0 ? `<div style="border-top:1px solid rgba(74,156,248,.1);padding-top:14px;margin-top:4px;">
+      <div class="modal-lbl" style="margin-bottom:8px;">Привязанные</div>
+      ${current.map(s => `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:10px;margin-bottom:6px;">
+        <span style="font-size:13px;">${serviceIcon(s.service)} ${esc(s.service)}</span>
+        <button onclick="doUnlinkService('${s.service}')" style="background:rgba(255,77,109,.15);border:1px solid rgba(255,77,109,.3);color:var(--red);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;">Удалить</button>
+      </div>`).join('')}
+    </div>` : ''}
+  </div>`);
+}
+
+async function doLinkService() {
+  const service = document.getElementById('ls-service').value;
+  const value   = document.getElementById('ls-value').value.trim();
+  if (!value) { notify('❌', 'Укажи ссылку или никнейм'); return; }
+  const res = await api('POST', '/users/me/link-service', { service, value });
+  if (res.error) { notify('❌', res.error); return; }
+  me = { ...me, linked_services: res.user.linked_services };
+  allUsers[me.id] = me;
+  closeModal();
+  notify('✅', `${service} привязан!`);
+}
+
+async function doUnlinkService(service) {
+  const res = await api('POST', '/users/me/unlink-service', { service });
+  if (res.error) { notify('❌', res.error); return; }
+  me = { ...me, linked_services: res.user.linked_services };
+  allUsers[me.id] = me;
+  closeModal();
+  notify('✅', 'Сервис удалён');
+}
+
+
   const res = await api('POST', `/admin/users/${userId}/action`, { action });
   if (res.error) { notify('❌', res.error); return; }
   await loadChatsAndUsers();

@@ -5,15 +5,12 @@ from datetime import timedelta
 from functools import wraps
 
 app = Flask(__name__, static_folder='static')
-app.secret_key = os.environ.get('SECRET_KEY', 'flux_secret_bloody_2025_xkq')
+app.secret_key = os.environ.get('SECRET_KEY', 'flux_secret_bloody_2025_xkq9')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 CORS(app, supports_credentials=True, origins='*')
 
-# ══════════════════════════════════════════════
-# ХРАНИЛИЩЕ — JSON файлы в папке data/
-# ══════════════════════════════════════════════
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(BASE, 'data')
 os.makedirs(DATA, exist_ok=True)
@@ -32,10 +29,8 @@ def save(name, data):
 def hp(p): return hashlib.sha256((p + 'flux_salt_2025').encode()).hexdigest()
 def gid(): return secrets.token_hex(10)
 def now(): return int(time.time() * 1000)
+def flux_id(): return 'FLX-' + secrets.token_hex(4).upper()
 
-# ══════════════════════════════════════════════
-# AUTH ДЕКОРАТОР
-# ══════════════════════════════════════════════
 def auth(f):
     @wraps(f)
     def w(*a, **kw):
@@ -49,54 +44,60 @@ def auth(f):
 def sys_msg(cid, text):
     msgs = load('messages')
     msgs.setdefault(cid, []).append({
-        'id': gid(), 'chat_id': cid,
-        'sender_id': None, 'sender_nick': None,
-        'text': text, 'system': True, 'timestamp': now()
+        'id': gid(), 'chat_id': cid, 'sender_id': None,
+        'sender_nick': None, 'text': text, 'system': True, 'timestamp': now()
     })
     save('messages', msgs)
 
 def chat_admin(u, c):
     return (u['role'] in ('admin','creator') or
-            u['id'] in c.get('admins', []) or
+            u['id'] in c.get('admins',[]) or
             u['id'] == c.get('creator_id'))
 
-def online(u):
-    return bool(u.get('online') and now() - u.get('last_seen', 0) < 15000)
+def is_online(u):
+    return bool(u.get('online') and now() - u.get('last_seen',0) < 15000)
 
-# ══════════════════════════════════════════════
-# SEED — только community, без хардкода bloody
-# ══════════════════════════════════════════════
 def seed():
     chats = load('chats')
     if 'community' not in chats:
         chats['community'] = {
             'id': 'community', 'type': 'group',
-            'name': 'Flux Community',
-            'description': 'Глобальный чат для всех',
-            'icon': '⚡', 'creator_id': None,
-            'pinned': True, 'members': [], 'admins': [],
-            'created_at': now()
+            'name': 'Flux Community', 'description': 'Глобальный чат для всех',
+            'icon': '⚡', 'creator_id': None, 'pinned': True,
+            'members': [], 'admins': [], 'created_at': now()
         }
         save('chats', chats)
         msgs = load('messages')
         msgs['community'] = [{
-            'id': gid(), 'chat_id': 'community',
-            'sender_id': None, 'sender_nick': None,
-            'text': '⚡ Добро пожаловать в Flux Community!',
+            'id': gid(), 'chat_id': 'community', 'sender_id': None,
+            'sender_nick': None, 'text': '⚡ Добро пожаловать в Flux Community!',
             'system': True, 'timestamp': now()
         }]
         save('messages', msgs)
 
-# ══════════════════════════════════════════════
-# REGISTER
-# ══════════════════════════════════════════════
+# ── RESET BLOODY (временный роут для сброса) ──
+@app.route('/api/reset-bloody')
+def reset_bloody():
+    users = load('users')
+    deleted = [uid for uid,u in list(users.items()) if u.get('username') == 'bloody']
+    for uid in deleted: del users[uid]
+    save('users', users)
+    chats = load('chats')
+    for c in chats.values():
+        c['members'] = [m for m in c.get('members',[]) if m not in deleted]
+        c['admins']  = [m for m in c.get('admins',[])  if m not in deleted]
+        if c.get('creator_id') in deleted: c['creator_id'] = None
+    save('chats', chats)
+    return jsonify({'ok': True, 'deleted': deleted})
+
+# ── REGISTER ──
 @app.route('/api/register', methods=['POST'])
 def register():
     d = request.json or {}
-    email    = d.get('email', '').strip().lower()
-    nick     = d.get('nick', '').strip()
-    username = re.sub(r'[^a-z0-9_]', '', d.get('username', '').strip().lower())
-    password = d.get('password', '')
+    email    = d.get('email','').strip().lower()
+    nick     = d.get('nick','').strip()
+    username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower())
+    password = d.get('password','')
 
     if not all([email, nick, username, password]):
         return jsonify({'error': 'Заполните все поля'}), 400
@@ -111,21 +112,22 @@ def register():
     if any(u['username'] == username for u in users.values()):
         return jsonify({'error': 'Username уже занят'}), 400
 
-    # username bloody → автоматически creator
     role = 'creator' if username == 'bloody' else 'user'
+    uid  = gid()
+    fid  = flux_id()
 
-    uid = gid()
     users[uid] = {
-        'id': uid, 'email': email, 'username': username, 'nick': nick,
+        'id': uid, 'flux_id': fid,
+        'email': email, 'username': username, 'nick': nick,
         'password': hp(password), 'role': role, 'avatar': None,
         'banned': False, 'muted': False,
-        'online': True, 'last_seen': now(), 'created_at': now()
+        'online': True, 'last_seen': now(), 'created_at': now(),
+        'linked_services': []
     }
     save('users', users)
 
-    # Добавить в community
     chats = load('chats')
-    comm = chats.get('community', {})
+    comm  = chats.get('community', {})
     if uid not in comm.get('members', []):
         comm.setdefault('members', []).append(uid)
     if role == 'creator':
@@ -141,14 +143,12 @@ def register():
     out = users[uid].copy(); out.pop('password', None)
     return jsonify({'ok': True, 'user': out})
 
-# ══════════════════════════════════════════════
-# LOGIN
-# ══════════════════════════════════════════════
+# ── LOGIN ──
 @app.route('/api/login', methods=['POST'])
 def login():
     d = request.json or {}
-    email    = d.get('email', '').strip().lower()
-    password = d.get('password', '')
+    email    = d.get('email','').strip().lower()
+    password = d.get('password','')
 
     users = load('users')
     uid = next((k for k,v in users.items() if v['email'] == email), None)
@@ -159,8 +159,9 @@ def login():
 
     u['online'] = True
     u['last_seen'] = now()
+    if not u.get('flux_id'): u['flux_id'] = flux_id()
+    if 'linked_services' not in u: u['linked_services'] = []
 
-    # Убедиться что в community
     chats = load('chats')
     comm = chats.get('community', {})
     if uid not in comm.get('members', []):
@@ -191,6 +192,8 @@ def get_me(me):
     users = load('users')
     u = users.get(me['id'], me)
     u['online'] = True; u['last_seen'] = now()
+    if not u.get('flux_id'): u['flux_id'] = flux_id()
+    if 'linked_services' not in u: u['linked_services'] = []
     save('users', users)
     out = u.copy(); out.pop('password', None)
     return jsonify(out)
@@ -212,7 +215,7 @@ def get_users(me):
     for u in load('users').values():
         if u['id'] == me['id']: continue
         out = u.copy(); out.pop('password', None)
-        out['online'] = online(u)
+        out['online'] = is_online(u)
         result.append(out)
     return jsonify(result)
 
@@ -222,15 +225,15 @@ def get_user(me, uid):
     u = load('users').get(uid)
     if not u: return jsonify({'error': 'Not found'}), 404
     out = u.copy(); out.pop('password', None)
-    out['online'] = online(u)
+    out['online'] = is_online(u)
     return jsonify(out)
 
 @app.route('/api/users/me/profile', methods=['PUT'])
 @auth
 def update_profile(me):
     d = request.json or {}
-    nick     = d.get('nick', '').strip()
-    username = re.sub(r'[^a-z0-9_]', '', d.get('username', '').strip().lower())
+    nick     = d.get('nick','').strip()
+    username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower())
     avatar   = d.get('avatar')
     if not nick or not username:
         return jsonify({'error': 'Заполните поля'}), 400
@@ -244,13 +247,41 @@ def update_profile(me):
     out = users[me['id']].copy(); out.pop('password', None)
     return jsonify(out)
 
-# ══════════════════════════════════════════════
-# ADMIN
-# ══════════════════════════════════════════════
+# ── LINK SERVICE ──
+@app.route('/api/users/me/link-service', methods=['POST'])
+@auth
+def link_service(me):
+    d = request.json or {}
+    service = d.get('service','').strip()
+    value   = d.get('value','').strip()
+    if not service or not value:
+        return jsonify({'error': 'Укажите сервис и значение'}), 400
+    users = load('users')
+    u = users[me['id']]
+    services = u.get('linked_services', [])
+    services = [s for s in services if s['service'] != service]
+    services.append({'service': service, 'value': value})
+    u['linked_services'] = services
+    save('users', users)
+    out = u.copy(); out.pop('password', None)
+    return jsonify({'ok': True, 'user': out})
+
+@app.route('/api/users/me/unlink-service', methods=['POST'])
+@auth
+def unlink_service(me):
+    service = (request.json or {}).get('service','')
+    users = load('users')
+    u = users[me['id']]
+    u['linked_services'] = [s for s in u.get('linked_services',[]) if s['service'] != service]
+    save('users', users)
+    out = u.copy(); out.pop('password', None)
+    return jsonify({'ok': True, 'user': out})
+
+# ── ADMIN ──
 @app.route('/api/admin/users/<uid>/action', methods=['POST'])
 @auth
 def admin_action(me, uid):
-    if me['role'] not in ('admin', 'creator'):
+    if me['role'] not in ('admin','creator'):
         return jsonify({'error': 'Forbidden'}), 403
     users = load('users')
     t = users.get(uid)
@@ -275,31 +306,27 @@ def admin_action(me, uid):
     out = t.copy(); out.pop('password', None)
     return jsonify({'ok': True, 'user': out})
 
-# ══════════════════════════════════════════════
-# CHATS
-# ══════════════════════════════════════════════
+# ── CHATS ──
 @app.route('/api/chats')
 @auth
 def get_chats(me):
-    chats = load('chats')
-    return jsonify([c for c in chats.values() if me['id'] in c.get('members', [])])
+    return jsonify([c for c in load('chats').values() if me['id'] in c.get('members',[])])
 
 @app.route('/api/chats', methods=['POST'])
 @auth
 def create_chat(me):
     d = request.json or {}
-    t    = d.get('type', 'group')
-    name = d.get('name', '').strip()
-    icon = d.get('icon', '').strip() or ('📢' if t == 'channel' else '👥')
+    t    = d.get('type','group')
+    name = d.get('name','').strip()
+    icon = d.get('icon','').strip() or ('📢' if t == 'channel' else '👥')
     if not name: return jsonify({'error': 'Укажите название'}), 400
     cid = gid()
     chats = load('chats')
     chats[cid] = {
         'id': cid, 'type': t, 'name': name,
-        'description': d.get('description', ''), 'icon': icon,
+        'description': d.get('description',''), 'icon': icon,
         'creator_id': me['id'], 'pinned': False,
-        'members': [me['id']], 'admins': [me['id']],
-        'created_at': now()
+        'members': [me['id']], 'admins': [me['id']], 'created_at': now()
     }
     save('chats', chats)
     sys_msg(cid, f'{"Канал" if t=="channel" else "Группа"} "{name}" создан(а)')
@@ -317,10 +344,9 @@ def create_dm(me):
             return jsonify(c)
     cid = gid()
     chats[cid] = {
-        'id': cid, 'type': 'dm', 'name': None,
-        'description': '', 'icon': '', 'creator_id': me['id'],
-        'pinned': False, 'members': [me['id'], oid], 'admins': [],
-        'created_at': now()
+        'id': cid, 'type': 'dm', 'name': None, 'description': '',
+        'icon': '', 'creator_id': me['id'], 'pinned': False,
+        'members': [me['id'], oid], 'admins': [], 'created_at': now()
     }
     save('chats', chats)
     return jsonify(chats[cid])
@@ -386,9 +412,7 @@ def clear_chat(me, cid):
     msgs = load('messages'); msgs[cid] = []; save('messages', msgs)
     return jsonify({'ok': True})
 
-# ══════════════════════════════════════════════
-# MESSAGES
-# ══════════════════════════════════════════════
+# ── MESSAGES ──
 @app.route('/api/chats/<cid>/messages')
 @auth
 def get_messages(me, cid):
@@ -398,8 +422,7 @@ def get_messages(me, cid):
     if me['id'] not in c.get('members', []):
         return jsonify({'error': 'Not a member'}), 403
     since = request.args.get('since', 0, type=int)
-    msgs = load('messages')
-    return jsonify([m for m in msgs.get(cid, []) if m['timestamp'] > since])
+    return jsonify([m for m in load('messages').get(cid,[]) if m['timestamp'] > since])
 
 @app.route('/api/chats/<cid>/messages', methods=['POST'])
 @auth
@@ -413,7 +436,7 @@ def send_message(me, cid):
         return jsonify({'error': 'Only admins can post'}), 403
     if me.get('muted') and me['role'] not in ('admin','creator'):
         return jsonify({'error': 'Вы замьючены'}), 403
-    text = (request.json or {}).get('text', '').strip()
+    text = (request.json or {}).get('text','').strip()
     if not text: return jsonify({'error': 'Empty'}), 400
     if text.startswith('/') and me['role'] in ('admin','creator'):
         return jsonify(handle_cmd(me, cid, text))
@@ -451,8 +474,7 @@ def handle_cmd(me, cid, text):
         uid, t = fu(a1)
         if not t: return {'error': 'Не найден'}
         if t['role'] == 'creator' and me['role'] != 'creator': return {'error': 'Нельзя'}
-        field, val, tmpl = simple[cmd]
-        t[field] = val; save('users', users)
+        f, v, tmpl = simple[cmd]; t[f] = v; save('users', users)
         sys_msg(cid, tmpl.replace('{u}', t['username']))
         return {'ok': True, 'command': cmd}
 
@@ -479,29 +501,7 @@ def handle_cmd(me, cid, text):
 
     return {'error': f'Неизвестная команда: /{cmd}'}
 
-# ══════════════════════════════════════════════
-# СБРОС АККАУНТА BLOODY (временный роут)
-# ══════════════════════════════════════════════
-@app.route('/api/reset-bloody')
-def reset_bloody():
-    users = load('users')
-    deleted = []
-    for uid in list(users.keys()):
-        if users[uid].get('username') == 'bloody':
-            deleted.append(uid)
-            del users[uid]
-    save('users', users)
-    chats = load('chats')
-    for c in chats.values():
-        c['members'] = [m for m in c.get('members',[]) if m not in deleted]
-        c['admins']  = [m for m in c.get('admins',[])  if m not in deleted]
-        if c.get('creator_id') in deleted: c['creator_id'] = None
-    save('chats', chats)
-    return jsonify({'ok': True, 'deleted_ids': deleted})
-
-# ══════════════════════════════════════════════
-# STATIC
-# ══════════════════════════════════════════════
+# ── STATIC ──
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
