@@ -1159,11 +1159,22 @@ function modalBg(e) { if (e.target === document.getElementById('modal-ov')) clos
 // BOOT
 // ═══════════════════════════════════════════════════════
 async function boot() {
+  // Показываем экран авторизации пока проверяем сессию
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').classList.add('hidden');
   const res = await api('GET', '/me');
   if (!res.error) {
     me = res;
     enterApp();
   }
+  // Если не авторизован — экран авторизации уже показан
+}
+
+function authTab(t) {
+  document.querySelectorAll('.auth-tab').forEach((b,i) =>
+    b.classList.toggle('active', (i===0&&t==='login')||(i===1&&t==='register')));
+  document.getElementById('f-login').style.display = t==='login' ? 'flex' : 'none';
+  document.getElementById('f-reg').style.display   = t==='register' ? 'flex' : 'none';
 }
 
 window.onload = boot;
