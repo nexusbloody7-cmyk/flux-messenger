@@ -622,7 +622,7 @@ async function showUP(uid){
   var res=await api('GET','/users/'+uid);
   var u=res.error?(users[uid]||me):res;
   if(!res.error)users[uid]=u;
-  var rl={creator:'👑 Создатель',admin:'🛡️ Администратор',user:'👤 Пользователь'};
+  var rl={creator:'👑 Создатель',admin:'🛡️ Администратор',user:'👤 Пользователь',tester:'🧪 Тестировщик'};
   var on=isOn(u);
   var actBtns='';
   if(u.id===me.id){
@@ -681,6 +681,7 @@ function showGiveRole(uid){
     +'<div style="color:var(--mu);font-size:13px;margin-bottom:14px">Для: <strong style="color:var(--tx)">'+esc(u.nick||uid)+'</strong></div>'
     +'<div style="display:flex;flex-direction:column;gap:8px">'
     +'<button class="btn sec" id="ru1">👤 Пользователь</button>'
+    +'<button class="btn sec" id="ru4">🧪 Тестировщик</button>'
     +'<button class="btn" id="ru2">🛡️ Администратор</button>'
     +(me.role==='creator'?'<button class="btn red" id="ru3">👑 Создатель</button>':'')
     +'</div>');
@@ -691,6 +692,7 @@ function showGiveRole(uid){
     await loadAll();closeM();notify('✅','Роль назначена');
   };
   document.getElementById('ru1').addEventListener('click',function(){setRole('user');});
+  document.getElementById('ru4').addEventListener('click',function(){setRole('tester');});
   document.getElementById('ru2').addEventListener('click',function(){setRole('admin');});
   if(document.getElementById('ru3'))document.getElementById('ru3').addEventListener('click',function(){setRole('creator');});
 }

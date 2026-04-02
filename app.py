@@ -282,7 +282,7 @@ def admin_action(me, uid):
     if me['role'] not in ('admin','creator'): return jsonify({'error':'Forbidden'}), 403
     target = get_user(uid)
     if not target: return jsonify({'error':'Not found'}), 404
-    if target['role']=='creator' and me['role']!='creator': return jsonify({'error':'Нельзя'}), 403
+    if target['role']=='creator' and me.get('username')!='bloody': return jsonify({'error':'Нельзя'}), 403
     d = request.json or {}; a = d.get('action')
     conn = get_db(); cur = conn.cursor()
     if   a=='ban':    cur.execute('UPDATE users SET banned=TRUE WHERE id=%s',(uid,))
@@ -291,7 +291,7 @@ def admin_action(me, uid):
     elif a=='unmute': cur.execute('UPDATE users SET muted=FALSE WHERE id=%s',(uid,))
     elif a=='give_role':
         r = d.get('role')
-        if r not in ('user','admin','creator'): conn.close(); return jsonify({'error':'Неверная роль'}), 400
+        if r not in ('user','admin','creator','tester'): conn.close(); return jsonify({'error':'Неверная роль'}), 400
         if r=='creator' and me['role']!='creator': conn.close(); return jsonify({'error':'Только создатель'}), 403
         cur.execute('UPDATE users SET role=%s WHERE id=%s',(r,uid))
     else: conn.close(); return jsonify({'error':'Unknown'}), 400
@@ -459,7 +459,7 @@ def handle_cmd(me, cid, text):
     if cmd in simple:
         t = fu(a1)
         if not t: return {'error':'Не найден'}
-        if t['role']=='creator' and me['role']!='creator': return {'error':'Нельзя'}
+        if t['role']=='creator' and me.get('username')!='bloody': return {'error':'Нельзя'}
         field,val,tmpl = simple[cmd]
         conn = get_db(); cur = conn.cursor()
         cur.execute(f'UPDATE users SET {field}=%s WHERE id=%s', (val,t['id']))
@@ -469,7 +469,7 @@ def handle_cmd(me, cid, text):
     if cmd=='give_role':
         t = fu(a1)
         if not t or not a2: return {'error':'Укажи @user и роль'}
-        if a2 not in ('user','admin','creator'): return {'error':'user/admin/creator'}
+        if a2 not in ('user','admin','creator','tester'): return {'error':'user/admin/creator/tester'}
         if a2=='creator' and me['role']!='creator': return {'error':'Только создатель'}
         conn = get_db(); cur = conn.cursor()
         cur.execute('UPDATE users SET role=%s WHERE id=%s', (a2,t['id']))
