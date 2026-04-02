@@ -630,7 +630,7 @@ async function showUP(uid){
   } else {
     actBtns='<button class="psab pr" id="dmup">✉️ Написать</button>';
   }
-  var fx=u.flux_id?'<div class="fxid"><div class="fxid-l">Flux ID</div><div class="fxid-v">⚡ '+esc(u.flux_id)+'</div></div>':'';
+  var fx=(u.flux_id&&u.id===me.id)?'<div class="fxid"><div class="fxid-l">Flux ID</div><div class="fxid-v">⚡ '+esc(u.flux_id)+'</div></div>':'';
   var svc=(u.linked_services||[]).length?'<div style="margin-top:10px">'+(u.linked_services||[]).map(function(s){return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(74,156,248,.1);border-radius:10px;margin-bottom:6px"><span style="font-size:18px">'+svcIc(s.service)+'</span><div><div style="font-size:12px;font-weight:600">'+esc(s.service)+'</div><div style="font-size:11px;color:var(--mu)">'+esc(s.value)+'</div></div></div>';}).join('')+'</div>':'';
   var lnkBtn=u.id===me.id?'<button class="btn sec" id="lnkbtn" style="margin-top:8px">🔗 Привязать сервис</button>':'';
   var adm='';
