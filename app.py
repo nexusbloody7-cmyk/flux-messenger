@@ -1,4 +1,4 @@
-import os, json, time, hashlib, secrets, re
+import os, json, time, hashlib, secrets, re, base64
 from flask import Flask, request, jsonify, send_from_directory, session
 from datetime import timedelta
 from functools import wraps
@@ -10,6 +10,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'flux_secret_bloody_2025_xkq9')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 
 @app.after_request
 def after_request(response):
@@ -44,8 +45,8 @@ def auth(f):
 
 def sys_msg(cid, text):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp)
-                   VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)''', (gid(), cid, text, now()))
+    cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp) VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)',
+                (gid(), cid, text, now()))
     conn.commit(); conn.close()
 
 def is_chat_admin(u, cid):
@@ -84,6 +85,7 @@ def get_user(uid):
     d = dict(u); d.pop('password', None)
     d['online'] = bool(d.get('online') and now() - (d.get('last_seen') or 0) < 15000)
     d['linked_services'] = json.loads(d.get('linked_services') or '[]')
+    d['privacy'] = json.loads(d.get('privacy') or '{}')
     return d
 
 def init_db():
@@ -94,44 +96,66 @@ def init_db():
         role TEXT DEFAULT 'user', avatar TEXT,
         banned BOOLEAN DEFAULT FALSE, muted BOOLEAN DEFAULT FALSE,
         online BOOLEAN DEFAULT FALSE, last_seen BIGINT DEFAULT 0,
-        created_at BIGINT DEFAULT 0, linked_services TEXT DEFAULT '[]'
+        created_at BIGINT DEFAULT 0, linked_services TEXT DEFAULT '[]',
+        privacy TEXT DEFAULT '{}'
     )''')
     cur.execute('''CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY, type TEXT, name TEXT, description TEXT,
-        icon TEXT, creator_id TEXT, pinned BOOLEAN DEFAULT FALSE,
+        icon TEXT, username TEXT, creator_id TEXT,
+        pinned BOOLEAN DEFAULT FALSE, verified BOOLEAN DEFAULT FALSE,
         created_at BIGINT DEFAULT 0
     )''')
     cur.execute('''CREATE TABLE IF NOT EXISTS chat_members (
         id SERIAL PRIMARY KEY, chat_id TEXT, user_id TEXT,
-        is_admin BOOLEAN DEFAULT FALSE, UNIQUE(chat_id,user_id)
+        is_admin BOOLEAN DEFAULT FALSE, pinned BOOLEAN DEFAULT FALSE,
+        UNIQUE(chat_id, user_id)
     )''')
     cur.execute('''CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY, chat_id TEXT, sender_id TEXT,
-        sender_nick TEXT, text TEXT, is_system BOOLEAN DEFAULT FALSE,
+        sender_nick TEXT, text TEXT, media_url TEXT, media_type TEXT,
+        is_system BOOLEAN DEFAULT FALSE, pinned BOOLEAN DEFAULT FALSE,
         timestamp BIGINT DEFAULT 0
     )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS reactions (
+        id SERIAL PRIMARY KEY, message_id TEXT, user_id TEXT, emoji TEXT,
+        UNIQUE(message_id, user_id)
+    )''')
     conn.commit()
+
     cur.execute('SELECT id FROM chats WHERE id=%s', ('community',))
     if not cur.fetchone():
-        cur.execute('''INSERT INTO chats (id,type,name,description,icon,creator_id,pinned,created_at)
-                       VALUES ('community','group','Flux Community','Глобальный чат для всех','⚡',NULL,TRUE,%s)''', (now(),))
-        cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp)
-                       VALUES (%s,'community',NULL,NULL,'⚡ Добро пожаловать в Flux Community!',TRUE,%s)''', (gid(), now()))
+        cur.execute('''INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at)
+                       VALUES ('community','group','Flux Community','Глобальный чат','⚡','community',NULL,TRUE,TRUE,%s)''', (now(),))
+        cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp) VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)',
+                    (gid(),'community','⚡ Добро пожаловать в Flux Community!',now()))
         conn.commit()
+
+    # Add missing columns if upgrading
+    try:
+        cur.execute('ALTER TABLE chats ADD COLUMN IF NOT EXISTS username TEXT')
+        cur.execute('ALTER TABLE chats ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE')
+        cur.execute('ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT')
+        cur.execute('ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type TEXT')
+        cur.execute('ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE')
+        cur.execute('ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE')
+        cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy TEXT DEFAULT \'{}\'')
+        conn.commit()
+    except: conn.rollback()
     conn.close()
 
+# ── RESET BLOODY ──
 @app.route('/api/reset-bloody')
 def reset_bloody():
     conn = get_db(); cur = conn.cursor()
     cur.execute('SELECT id FROM users WHERE username=%s', ('bloody',))
-    rows = cur.fetchall()
-    deleted = [r['id'] for r in rows]
+    rows = cur.fetchall(); deleted = [r['id'] for r in rows]
     for uid in deleted:
         cur.execute('DELETE FROM chat_members WHERE user_id=%s', (uid,))
         cur.execute('DELETE FROM users WHERE id=%s', (uid,))
     conn.commit(); conn.close()
     return jsonify({'ok': True, 'deleted': deleted})
 
+# ── REGISTER ──
 @app.route('/api/register', methods=['POST'])
 def register():
     d = request.json or {}
@@ -139,12 +163,9 @@ def register():
     nick     = d.get('nick','').strip()
     username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower())
     password = d.get('password','')
-    if not all([email,nick,username,password]):
-        return jsonify({'error':'Заполните все поля'}), 400
-    if len(password) < 6:
-        return jsonify({'error':'Пароль минимум 6 символов'}), 400
-    if len(username) < 3:
-        return jsonify({'error':'Username минимум 3 символа'}), 400
+    if not all([email,nick,username,password]): return jsonify({'error':'Заполните все поля'}), 400
+    if len(password) < 6: return jsonify({'error':'Пароль минимум 6 символов'}), 400
+    if len(username) < 3: return jsonify({'error':'Username минимум 3 символа'}), 400
     conn = get_db(); cur = conn.cursor()
     cur.execute('SELECT id FROM users WHERE email=%s', (email,))
     if cur.fetchone(): conn.close(); return jsonify({'error':'Email уже занят'}), 400
@@ -152,8 +173,8 @@ def register():
     if cur.fetchone(): conn.close(); return jsonify({'error':'Username уже занят'}), 400
     role = 'creator' if username == 'bloody' else 'user'
     uid = gid(); fid = make_flux_id()
-    cur.execute('''INSERT INTO users (id,flux_id,email,username,nick,password,role,avatar,banned,muted,online,last_seen,created_at,linked_services)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,NULL,FALSE,FALSE,TRUE,%s,%s,'[]')''',
+    cur.execute('''INSERT INTO users (id,flux_id,email,username,nick,password,role,avatar,banned,muted,online,last_seen,created_at,linked_services,privacy)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,NULL,FALSE,FALSE,TRUE,%s,%s,'[]','{}')''',
                 (uid,fid,email,username,nick,hp(password),role,now(),now()))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING',
                 ('community',uid,role=='creator'))
@@ -164,10 +185,11 @@ def register():
     session.permanent = True; session['uid'] = uid
     return jsonify({'ok':True,'user':get_user(uid)})
 
+# ── LOGIN ──
 @app.route('/api/login', methods=['POST'])
 def login():
     d = request.json or {}
-    email    = d.get('email','').strip().lower()
+    email = d.get('email','').strip().lower()
     password = d.get('password','')
     conn = get_db(); cur = conn.cursor()
     cur.execute('SELECT * FROM users WHERE email=%s', (email,))
@@ -177,8 +199,7 @@ def login():
     if u.get('banned'): conn.close(); return jsonify({'error':'Аккаунт заблокирован'}), 403
     if u['password'] != hp(password): conn.close(); return jsonify({'error':'Неверный пароль'}), 400
     cur.execute('UPDATE users SET online=TRUE,last_seen=%s WHERE id=%s', (now(),u['id']))
-    cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE) ON CONFLICT DO NOTHING',
-                ('community',u['id']))
+    cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE) ON CONFLICT DO NOTHING', ('community',u['id']))
     conn.commit(); conn.close()
     session.permanent = True; session['uid'] = u['id']
     return jsonify({'ok':True,'user':get_user(u['id'])})
@@ -219,6 +240,7 @@ def get_users(me):
         d = dict(u); d.pop('password',None)
         d['online'] = bool(d.get('online') and now()-(d.get('last_seen') or 0)<15000)
         d['linked_services'] = json.loads(d.get('linked_services') or '[]')
+        d['privacy'] = json.loads(d.get('privacy') or '{}')
         result.append(d)
     return jsonify(result)
 
@@ -236,6 +258,7 @@ def update_profile(me):
     nick     = d.get('nick','').strip()
     username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower())
     avatar   = d.get('avatar')
+    privacy  = d.get('privacy')
     if not nick or not username: return jsonify({'error':'Заполните поля'}), 400
     conn = get_db(); cur = conn.cursor()
     cur.execute('SELECT id FROM users WHERE username=%s AND id!=%s', (username,me['id']))
@@ -244,6 +267,8 @@ def update_profile(me):
         cur.execute('UPDATE users SET nick=%s,username=%s,avatar=%s WHERE id=%s', (nick,username,avatar,me['id']))
     else:
         cur.execute('UPDATE users SET nick=%s,username=%s WHERE id=%s', (nick,username,me['id']))
+    if privacy is not None:
+        cur.execute('UPDATE users SET privacy=%s WHERE id=%s', (json.dumps(privacy),me['id']))
     conn.commit(); conn.close()
     return jsonify(get_user(me['id']))
 
@@ -276,47 +301,92 @@ def unlink_service(me):
     conn.commit(); conn.close()
     return jsonify({'ok':True,'user':get_user(me['id'])})
 
+# ── ADMIN ──
 @app.route('/api/admin/users/<uid>/action', methods=['POST'])
 @auth
 def admin_action(me, uid):
     if me['role'] not in ('admin','creator'): return jsonify({'error':'Forbidden'}), 403
     target = get_user(uid)
     if not target: return jsonify({'error':'Not found'}), 404
-    if target['role']=='creator' and me.get('username')!='bloody': return jsonify({'error':'Нельзя'}), 403
+    if target['role'] == 'creator' and me.get('username') != 'bloody': return jsonify({'error':'Нельзя'}), 403
     d = request.json or {}; a = d.get('action')
     conn = get_db(); cur = conn.cursor()
-    if   a=='ban':    cur.execute('UPDATE users SET banned=TRUE WHERE id=%s',(uid,))
-    elif a=='unban':  cur.execute('UPDATE users SET banned=FALSE WHERE id=%s',(uid,))
-    elif a=='mute':   cur.execute('UPDATE users SET muted=TRUE WHERE id=%s',(uid,))
-    elif a=='unmute': cur.execute('UPDATE users SET muted=FALSE WHERE id=%s',(uid,))
-    elif a=='give_role':
+    if   a == 'ban':    cur.execute('UPDATE users SET banned=TRUE WHERE id=%s',(uid,))
+    elif a == 'unban':  cur.execute('UPDATE users SET banned=FALSE WHERE id=%s',(uid,))
+    elif a == 'mute':   cur.execute('UPDATE users SET muted=TRUE WHERE id=%s',(uid,))
+    elif a == 'unmute': cur.execute('UPDATE users SET muted=FALSE WHERE id=%s',(uid,))
+    elif a == 'give_role':
         r = d.get('role')
         if r not in ('user','admin','creator','tester'): conn.close(); return jsonify({'error':'Неверная роль'}), 400
-        if r=='creator' and me['role']!='creator': conn.close(); return jsonify({'error':'Только создатель'}), 403
+        if r == 'creator' and me.get('username') != 'bloody': conn.close(); return jsonify({'error':'Только bloody'}), 403
         cur.execute('UPDATE users SET role=%s WHERE id=%s',(r,uid))
-    else: conn.close(); return jsonify({'error':'Unknown'}), 400
+    else: conn.close(); return jsonify({'error':'Unknown action'}), 400
     conn.commit(); conn.close()
     return jsonify({'ok':True,'user':get_user(uid)})
 
+# ── ADMIN STATS (bloody only) ──
+@app.route('/api/admin/stats')
+@auth
+def admin_stats(me):
+    if me.get('username') != 'bloody' and me['role'] != 'creator':
+        return jsonify({'error':'Forbidden'}), 403
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) as cnt FROM users')
+    users_count = cur.fetchone()['cnt']
+    cur.execute('SELECT COUNT(*) as cnt FROM chats')
+    chats_count = cur.fetchone()['cnt']
+    cur.execute('SELECT COUNT(*) as cnt FROM messages WHERE is_system=FALSE')
+    msgs_count = cur.fetchone()['cnt']
+    cur.execute('SELECT COUNT(*) as cnt FROM users WHERE online=TRUE AND last_seen > %s', (now()-15000,))
+    online_count = cur.fetchone()['cnt']
+    cur.execute('SELECT COUNT(*) as cnt FROM users WHERE banned=TRUE')
+    banned_count = cur.fetchone()['cnt']
+    cur.execute('SELECT id,nick,username,role,created_at,online FROM users ORDER BY created_at DESC LIMIT 10')
+    recent_users = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify({
+        'users': users_count, 'chats': chats_count,
+        'messages': msgs_count, 'online': online_count,
+        'banned': banned_count, 'recent_users': recent_users
+    })
+
+# ── CHATS ──
 @app.route('/api/chats')
 @auth
 def get_chats(me):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT chat_id FROM chat_members WHERE user_id=%s', (me['id'],))
-    ids = [r['chat_id'] for r in cur.fetchall()]; conn.close()
-    return jsonify([c for c in [get_chat(cid) for cid in ids] if c])
+    cur.execute('''SELECT cm.pinned as member_pinned, c.* FROM chat_members cm
+                   JOIN chats c ON c.id=cm.chat_id
+                   WHERE cm.user_id=%s ORDER BY cm.pinned DESC, c.created_at DESC''', (me['id'],))
+    chat_ids = [(r['id'], r['member_pinned']) for r in cur.fetchall()]
+    conn.close()
+    result = []
+    for cid, pinned in chat_ids:
+        c = get_chat(cid)
+        if c:
+            c['member_pinned'] = pinned
+            result.append(c)
+    return jsonify(result)
 
 @app.route('/api/chats', methods=['POST'])
 @auth
 def create_chat(me):
     d = request.json or {}
-    t = d.get('type','group'); name = d.get('name','').strip()
+    t    = d.get('type','group')
+    name = d.get('name','').strip()
+    ch_username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower()) if t == 'channel' else None
     icon = d.get('icon','').strip() or ('📢' if t=='channel' else '👥')
     if not name: return jsonify({'error':'Укажите название'}), 400
+    if t == 'channel' and not ch_username: return jsonify({'error':'Укажите username канала'}), 400
+    if ch_username:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute('SELECT id FROM chats WHERE username=%s', (ch_username,))
+        if cur.fetchone(): conn.close(); return jsonify({'error':'Username канала занят'}), 400
+        conn.close()
     cid = gid()
     conn = get_db(); cur = conn.cursor()
-    cur.execute('INSERT INTO chats (id,type,name,description,icon,creator_id,pinned,created_at) VALUES (%s,%s,%s,%s,%s,%s,FALSE,%s)',
-                (cid,t,name,d.get('description',''),icon,me['id'],now()))
+    cur.execute('INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)',
+                (cid,t,name,d.get('description',''),icon,ch_username,me['id'],now()))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,TRUE)', (cid,me['id']))
     conn.commit(); conn.close()
     sys_msg(cid, f'{"Канал" if t=="channel" else "Группа"} "{name}" создан(а)')
@@ -336,7 +406,7 @@ def create_dm(me):
     ex = cur.fetchone()
     if ex: conn.close(); return jsonify(get_chat(ex['chat_id']))
     cid = gid()
-    cur.execute('INSERT INTO chats (id,type,name,description,icon,creator_id,pinned,created_at) VALUES (%s,%s,NULL,%s,%s,%s,FALSE,%s)',
+    cur.execute('INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at) VALUES (%s,%s,NULL,%s,%s,NULL,%s,FALSE,FALSE,%s)',
                 (cid,'dm','','',me['id'],now()))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE)', (cid,me['id']))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE)', (cid,oid))
@@ -360,10 +430,31 @@ def delete_chat(me, cid):
     if me['role'] not in ('admin','creator') and not is_chat_admin(me,cid):
         return jsonify({'error':'Forbidden'}), 403
     conn = get_db(); cur = conn.cursor()
+    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)', (cid,))
     cur.execute('DELETE FROM messages WHERE chat_id=%s', (cid,))
     cur.execute('DELETE FROM chat_members WHERE chat_id=%s', (cid,))
     cur.execute('DELETE FROM chats WHERE id=%s', (cid,))
     conn.commit(); conn.close()
+    return jsonify({'ok':True})
+
+@app.route('/api/chats/<cid>/pin-chat', methods=['POST'])
+@auth
+def pin_chat(me, cid):
+    pinned = (request.json or {}).get('pinned', True)
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE chat_members SET pinned=%s WHERE chat_id=%s AND user_id=%s', (pinned,cid,me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True})
+
+@app.route('/api/chats/<cid>/verify', methods=['POST'])
+@auth
+def verify_chat(me, cid):
+    if me.get('username') != 'bloody': return jsonify({'error':'Forbidden'}), 403
+    verified = (request.json or {}).get('verified', True)
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE chats SET verified=%s WHERE id=%s', (verified,cid))
+    conn.commit(); conn.close()
+    sys_msg(cid, '✅ Канал верифицирован' if verified else '❌ Верификация снята')
     return jsonify({'ok':True})
 
 @app.route('/api/chats/<cid>/members', methods=['POST'])
@@ -394,10 +485,12 @@ def leave_chat(me, cid):
 def clear_chat(me, cid):
     if not is_chat_admin(me,cid): return jsonify({'error':'Forbidden'}), 403
     conn = get_db(); cur = conn.cursor()
+    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)', (cid,))
     cur.execute('DELETE FROM messages WHERE chat_id=%s', (cid,))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
+# ── MESSAGES ──
 @app.route('/api/chats/<cid>/messages')
 @auth
 def get_messages(me, cid):
@@ -405,11 +498,17 @@ def get_messages(me, cid):
     since = request.args.get('since',0,type=int)
     conn = get_db(); cur = conn.cursor()
     cur.execute('SELECT * FROM messages WHERE chat_id=%s AND timestamp>%s ORDER BY timestamp ASC', (cid,since))
-    msgs = cur.fetchall(); conn.close()
+    msgs = cur.fetchall()
     result = []
     for m in msgs:
         d = dict(m); d['system'] = d.pop('is_system',False)
+        cur.execute('SELECT emoji, COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji', (m['id'],))
+        d['reactions'] = [dict(r) for r in cur.fetchall()]
+        cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (m['id'],me['id']))
+        my_r = cur.fetchone()
+        d['my_reaction'] = my_r['emoji'] if my_r else None
         result.append(d)
+    conn.close()
     return jsonify(result)
 
 @app.route('/api/chats/<cid>/messages', methods=['POST'])
@@ -420,75 +519,224 @@ def send_message(me, cid):
     cur.execute('SELECT * FROM chats WHERE id=%s', (cid,))
     c = cur.fetchone(); conn.close()
     if not c: return jsonify({'error':'Chat not found'}), 404
-    if c['type']=='channel' and not is_chat_admin(me,cid):
+    if c['type'] == 'channel' and not is_chat_admin(me,cid):
         return jsonify({'error':'Only admins can post'}), 403
     if me.get('muted') and me['role'] not in ('admin','creator'):
         return jsonify({'error':'Вы замьючены'}), 403
-    text = (request.json or {}).get('text','').strip()
-    if not text: return jsonify({'error':'Empty'}), 400
-    if text.startswith('/') and me['role'] in ('admin','creator'):
+    d = request.json or {}
+    text = d.get('text','').strip()
+    media_url = d.get('media_url')
+    media_type = d.get('media_type')
+    if not text and not media_url: return jsonify({'error':'Empty'}), 400
+    if text and text.startswith('/') and me['role'] in ('admin','creator'):
         return jsonify(handle_cmd(me,cid,text))
     mid = gid()
     conn = get_db(); cur = conn.cursor()
-    cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp) VALUES (%s,%s,%s,%s,%s,FALSE,%s)',
-                (mid,cid,me['id'],me['nick'],text,now()))
+    cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,media_url,media_type,is_system,pinned,timestamp) VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)',
+                (mid,cid,me['id'],me['nick'],text or '',media_url,media_type,now()))
     conn.commit()
     cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
     msg = dict(cur.fetchone()); conn.close()
     msg['system'] = msg.pop('is_system',False)
+    msg['reactions'] = []; msg['my_reaction'] = None
     return jsonify(msg)
 
+@app.route('/api/messages/<mid>/delete', methods=['POST'])
+@auth
+def delete_message(me, mid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    msg = cur.fetchone()
+    if not msg: conn.close(); return jsonify({'error':'Not found'}), 404
+    if msg['sender_id'] != me['id'] and not is_chat_admin(me, msg['chat_id']):
+        conn.close(); return jsonify({'error':'Forbidden'}), 403
+    cur.execute('DELETE FROM reactions WHERE message_id=%s', (mid,))
+    cur.execute('DELETE FROM messages WHERE id=%s', (mid,))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True})
+
+@app.route('/api/messages/<mid>/pin', methods=['POST'])
+@auth
+def pin_message(me, mid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    msg = cur.fetchone()
+    if not msg: conn.close(); return jsonify({'error':'Not found'}), 404
+    if not is_chat_admin(me, msg['chat_id']): conn.close(); return jsonify({'error':'Forbidden'}), 403
+    pinned = (request.json or {}).get('pinned', True)
+    cur.execute('UPDATE messages SET pinned=%s WHERE id=%s', (pinned,mid))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True})
+
+@app.route('/api/messages/<mid>/react', methods=['POST'])
+@auth
+def react_message(me, mid):
+    emoji = (request.json or {}).get('emoji','')
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
+    existing = cur.fetchone()
+    if existing:
+        if existing['emoji'] == emoji:
+            cur.execute('DELETE FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
+        else:
+            cur.execute('UPDATE reactions SET emoji=%s WHERE message_id=%s AND user_id=%s', (emoji,mid,me['id']))
+    else:
+        cur.execute('INSERT INTO reactions (message_id,user_id,emoji) VALUES (%s,%s,%s)', (mid,me['id'],emoji))
+    conn.commit()
+    cur.execute('SELECT emoji, COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji', (mid,))
+    reactions = [dict(r) for r in cur.fetchall()]
+    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
+    my_r = cur.fetchone()
+    conn.close()
+    return jsonify({'ok':True,'reactions':reactions,'my_reaction':my_r['emoji'] if my_r else None})
+
+# ── MEDIA UPLOAD ──
+@app.route('/api/upload', methods=['POST'])
+@auth
+def upload_media(me):
+    d = request.json or {}
+    data_url = d.get('data_url','')
+    media_type = d.get('type','image')
+    if not data_url: return jsonify({'error':'No data'}), 400
+    # Store as base64 data URL directly
+    return jsonify({'ok':True,'url':data_url,'type':media_type})
+
+# ── COMMANDS ──
 def handle_cmd(me, cid, text):
     parts = text[1:].split()
     cmd = parts[0].lower() if parts else ''
     a1 = parts[1] if len(parts)>1 else None
     a2 = parts[2] if len(parts)>2 else None
+    conn = get_db(); cur = conn.cursor()
+
     def fu(name):
         if not name: return None
         n = name.lstrip('@')
-        conn = get_db(); cur = conn.cursor()
         cur.execute('SELECT * FROM users WHERE username=%s OR id=%s', (n,n))
-        u = cur.fetchone(); conn.close()
+        u = cur.fetchone()
         return dict(u) if u else None
+
     simple = {
-        'ban':   ('banned',True, '🔨 @{u} заблокирован'),
-        'unban': ('banned',False,'✅ @{u} разблокирован'),
-        'mute':  ('muted', True, '🔇 @{u} замьючен'),
-        'unmute':('muted', False,'🔊 @{u} размьючен'),
+        'ban':    ('banned',True, '🔨 @{u} заблокирован'),
+        'unban':  ('banned',False,'✅ @{u} разблокирован'),
+        'mute':   ('muted', True, '🔇 @{u} замьючен'),
+        'unmute': ('muted', False,'🔊 @{u} размьючен'),
     }
+
     if cmd in simple:
         t = fu(a1)
-        if not t: return {'error':'Не найден'}
-        if t['role']=='creator' and me.get('username')!='bloody': return {'error':'Нельзя'}
+        if not t: conn.close(); return {'error':'Не найден'}
+        if t['role']=='creator' and me.get('username')!='bloody': conn.close(); return {'error':'Нельзя'}
         field,val,tmpl = simple[cmd]
-        conn = get_db(); cur = conn.cursor()
-        cur.execute(f'UPDATE users SET {field}=%s WHERE id=%s', (val,t['id']))
+        cur.execute(f'UPDATE users SET {field}=%s WHERE id=%s',(val,t['id']))
         conn.commit(); conn.close()
         sys_msg(cid, tmpl.replace('{u}',t['username']))
         return {'ok':True,'command':cmd}
-    if cmd=='give_role':
+
+    if cmd == 'give_role':
         t = fu(a1)
-        if not t or not a2: return {'error':'Укажи @user и роль'}
-        if a2 not in ('user','admin','creator','tester'): return {'error':'user/admin/creator/tester'}
-        if a2=='creator' and me['role']!='creator': return {'error':'Только создатель'}
-        conn = get_db(); cur = conn.cursor()
-        cur.execute('UPDATE users SET role=%s WHERE id=%s', (a2,t['id']))
+        if not t or not a2: conn.close(); return {'error':'Укажи @user и роль'}
+        if a2 not in ('user','admin','creator','tester'): conn.close(); return {'error':'user/admin/creator/tester'}
+        if a2=='creator' and me.get('username')!='bloody': conn.close(); return {'error':'Только bloody'}
+        cur.execute('UPDATE users SET role=%s WHERE id=%s',(a2,t['id']))
         conn.commit(); conn.close()
-        sys_msg(cid, f'👑 @{t["username"]} → роль: {a2}')
+        sys_msg(cid,f'👑 @{t["username"]} → роль: {a2}')
         return {'ok':True,'command':cmd}
-    if cmd=='announce':
+
+    if cmd == 'announce':
+        conn.close()
         sys_msg('community','📢 Объявление: '+' '.join(parts[1:]))
         return {'ok':True,'command':cmd}
-    if cmd=='delete_chat':
+
+    if cmd == 'delete_chat':
         target = a1 or cid
-        conn = get_db(); cur = conn.cursor()
+        cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)',(target,))
         cur.execute('DELETE FROM messages WHERE chat_id=%s',(target,))
         cur.execute('DELETE FROM chat_members WHERE chat_id=%s',(target,))
         cur.execute('DELETE FROM chats WHERE id=%s',(target,))
         conn.commit(); conn.close()
         return {'ok':True,'command':cmd,'deleted_chat':target}
+
+    if cmd == 'verify':
+        t_chat = a1
+        if not t_chat: conn.close(); return {'error':'Укажи ID или username канала'}
+        cur.execute('UPDATE chats SET verified=TRUE WHERE id=%s OR username=%s',(t_chat,t_chat))
+        conn.commit(); conn.close()
+        sys_msg(cid,'✅ Канал верифицирован')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'unverify':
+        t_chat = a1
+        if not t_chat: conn.close(); return {'error':'Укажи ID или username канала'}
+        cur.execute('UPDATE chats SET verified=FALSE WHERE id=%s OR username=%s',(t_chat,t_chat))
+        conn.commit(); conn.close()
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'pin':
+        # Pin last message or by id
+        cur.execute('SELECT id FROM messages WHERE chat_id=%s ORDER BY timestamp DESC LIMIT 1',(cid,))
+        msg = cur.fetchone()
+        if msg:
+            cur.execute('UPDATE messages SET pinned=TRUE WHERE id=%s',(msg['id'],))
+            conn.commit()
+        conn.close()
+        sys_msg(cid,'📌 Сообщение закреплено')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'unpin':
+        cur.execute('UPDATE messages SET pinned=FALSE WHERE chat_id=%s',(cid,))
+        conn.commit(); conn.close()
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'slowmode':
+        conn.close()
+        sys_msg(cid,f'🐌 Медленный режим включён: {a1 or "30"}с')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'rename':
+        new_name = ' '.join(parts[1:])
+        if new_name:
+            cur.execute('UPDATE chats SET name=%s WHERE id=%s',(new_name,cid))
+            conn.commit()
+        conn.close()
+        sys_msg(cid,f'✏️ Чат переименован: {new_name}')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'kick':
+        t = fu(a1)
+        if not t: conn.close(); return {'error':'Не найден'}
+        cur.execute('DELETE FROM chat_members WHERE chat_id=%s AND user_id=%s',(cid,t['id']))
+        conn.commit(); conn.close()
+        sys_msg(cid,f'👢 @{t["username"]} исключён из чата')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'stats':
+        cur.execute('SELECT COUNT(*) as cnt FROM users')
+        u_cnt = cur.fetchone()['cnt']
+        cur.execute('SELECT COUNT(*) as cnt FROM messages WHERE is_system=FALSE')
+        m_cnt = cur.fetchone()['cnt']
+        cur.execute('SELECT COUNT(*) as cnt FROM users WHERE online=TRUE AND last_seen > %s',(now()-15000,))
+        o_cnt = cur.fetchone()['cnt']
+        conn.close()
+        sys_msg(cid,f'📊 Статистика: {u_cnt} юзеров | {m_cnt} сообщений | {o_cnt} онлайн')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'broadcast':
+        msg_text = ' '.join(parts[1:])
+        if msg_text:
+            cur.execute('SELECT DISTINCT chat_id FROM chat_members')
+            chat_ids = [r['chat_id'] for r in cur.fetchall()]
+            conn.close()
+            for chat_id in chat_ids:
+                sys_msg(chat_id,f'📢 Broadcast от @bloody: {msg_text}')
+        else:
+            conn.close()
+        return {'ok':True,'command':cmd}
+
+    conn.close()
     return {'error':f'Неизвестная команда: /{cmd}'}
 
+# ── STATIC ──
 @app.route('/', defaults={'path':''})
 @app.route('/<path:path>')
 def serve(path):
