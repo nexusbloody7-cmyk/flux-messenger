@@ -30,7 +30,7 @@ def gid(): return secrets.token_hex(10)
 def now(): return int(time.time() * 1000)
 def make_flux_id(): return 'FLX-' + secrets.token_hex(4).upper()
 
-PREMIUM_PRICE = 299  # Flux Coins
+PREMIUM_PRICE = 299
 
 def auth(f):
     @wraps(f)
@@ -46,7 +46,8 @@ def auth(f):
 
 def sys_msg(cid, text):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp) VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)',
+    cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp)
+                   VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)''',
                 (gid(), cid, text, now()))
     conn.commit(); conn.close()
 
@@ -90,6 +91,9 @@ def get_user(uid):
     d['flux_coins'] = d.get('flux_coins') or 0
     d['premium'] = bool(d.get('premium'))
     d['bio'] = d.get('bio') or ''
+    d['premium_features'] = json.loads(d.get('premium_features') or '{}')
+    d['streak'] = d.get('streak') or 0
+    d['last_login_date'] = d.get('last_login_date') or ''
     return d
 
 def init_db():
@@ -101,9 +105,15 @@ def init_db():
         role TEXT DEFAULT 'user', avatar TEXT,
         banned BOOLEAN DEFAULT FALSE, muted BOOLEAN DEFAULT FALSE,
         online BOOLEAN DEFAULT FALSE, last_seen BIGINT DEFAULT 0,
-        created_at BIGINT DEFAULT 0, linked_services TEXT DEFAULT '[]',
-        privacy TEXT DEFAULT '{}', bio TEXT DEFAULT '',
-        flux_coins INTEGER DEFAULT 0, premium BOOLEAN DEFAULT FALSE
+        created_at BIGINT DEFAULT 0,
+        linked_services TEXT DEFAULT '[]',
+        privacy TEXT DEFAULT '{}',
+        bio TEXT DEFAULT '',
+        flux_coins INTEGER DEFAULT 0,
+        premium BOOLEAN DEFAULT FALSE,
+        premium_features TEXT DEFAULT '{}',
+        streak INTEGER DEFAULT 0,
+        last_login_date TEXT DEFAULT ''
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS chats (
@@ -124,13 +134,22 @@ def init_db():
         sender_nick TEXT, text TEXT,
         reply_to TEXT DEFAULT NULL,
         forwarded_from TEXT DEFAULT NULL,
-        is_system BOOLEAN DEFAULT FALSE, pinned BOOLEAN DEFAULT FALSE,
+        is_system BOOLEAN DEFAULT FALSE,
+        pinned BOOLEAN DEFAULT FALSE,
         timestamp BIGINT DEFAULT 0
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS reactions (
         id SERIAL PRIMARY KEY, message_id TEXT, user_id TEXT, emoji TEXT,
         UNIQUE(message_id, user_id)
+    )''')
+
+    cur.execute('''CREATE TABLE IF NOT EXISTS coin_transfers (
+        id SERIAL PRIMARY KEY,
+        from_id TEXT, to_id TEXT,
+        amount INTEGER,
+        note TEXT DEFAULT '',
+        created_at BIGINT DEFAULT 0
     )''')
 
     conn.commit()
@@ -140,26 +159,33 @@ def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS flux_coins INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_features TEXT DEFAULT '{}'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_date TEXT DEFAULT ''",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT DEFAULT NULL",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS forwarded_from TEXT DEFAULT NULL",
-        "ALTER TABLE messages DROP COLUMN IF EXISTS media_url",
-        "ALTER TABLE messages DROP COLUMN IF EXISTS media_type",
+        """CREATE TABLE IF NOT EXISTS coin_transfers (
+            id SERIAL PRIMARY KEY, from_id TEXT, to_id TEXT,
+            amount INTEGER DEFAULT 0, note TEXT DEFAULT '',
+            created_at BIGINT DEFAULT 0)""",
     ]
     for m in migrations:
-        try:
-            cur.execute(m); conn.commit()
+        try: cur.execute(m); conn.commit()
         except: conn.rollback()
 
+    # Community chat
     cur.execute('SELECT id FROM chats WHERE id=%s', ('community',))
     if not cur.fetchone():
         cur.execute('''INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at)
                        VALUES ('community','group','Flux Community','Глобальный чат','⚡','community',NULL,TRUE,TRUE,%s)''', (now(),))
-        cur.execute('INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp) VALUES (%s,%s,NULL,NULL,%s,TRUE,%s)',
-                    (gid(),'community','⚡ Добро пожаловать в Flux Community!',now()))
+        cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,is_system,timestamp)
+                       VALUES (%s,'community',NULL,NULL,'⚡ Добро пожаловать в Flux Community!',TRUE,%s)''', (gid(),now()))
         conn.commit()
     conn.close()
 
-# ── RESET BLOODY ──────────────────────────────
+# ─────────────────────────────────────────────
+# RESET BLOODY
+# ─────────────────────────────────────────────
 @app.route('/api/reset-bloody')
 def reset_bloody():
     conn = get_db(); cur = conn.cursor()
@@ -171,7 +197,9 @@ def reset_bloody():
     conn.commit(); conn.close()
     return jsonify({'ok': True, 'deleted': deleted})
 
-# ── REGISTER ──────────────────────────────────
+# ─────────────────────────────────────────────
+# AUTH
+# ─────────────────────────────────────────────
 @app.route('/api/register', methods=['POST'])
 def register():
     d = request.json or {}
@@ -192,10 +220,13 @@ def register():
     if cur.fetchone(): conn.close(); return jsonify({'error':'Username уже занят'}), 400
     role = 'creator' if username == 'bloody' else 'user'
     uid = gid(); fid = make_flux_id()
-    cur.execute('''INSERT INTO users (id,flux_id,email,username,nick,password,role,avatar,
-                   banned,muted,online,last_seen,created_at,linked_services,privacy,bio,flux_coins,premium)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,NULL,FALSE,FALSE,TRUE,%s,%s,'[]','{}','',0,FALSE)''',
-                (uid,fid,email,username,nick,hp(password),role,now(),now()))
+    today = time.strftime('%Y-%m-%d')
+    cur.execute('''INSERT INTO users
+        (id,flux_id,email,username,nick,password,role,avatar,banned,muted,online,
+         last_seen,created_at,linked_services,privacy,bio,flux_coins,premium,
+         premium_features,streak,last_login_date)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,NULL,FALSE,FALSE,TRUE,%s,%s,'[]','{}','',0,FALSE,'{}',1,%s)''',
+        (uid,fid,email,username,nick,hp(password),role,now(),now(),today))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING',
                 ('community',uid,role=='creator'))
     if role == 'creator':
@@ -205,7 +236,6 @@ def register():
     session.permanent = True; session['uid'] = uid
     return jsonify({'ok':True,'user':get_user(uid)})
 
-# ── LOGIN ──────────────────────────────────────
 @app.route('/api/login', methods=['POST'])
 def login():
     d = request.json or {}
@@ -218,7 +248,20 @@ def login():
     u = dict(u)
     if u.get('banned'): conn.close(); return jsonify({'error':'Аккаунт заблокирован'}), 403
     if u['password'] != hp(password): conn.close(); return jsonify({'error':'Неверный пароль'}), 400
-    cur.execute('UPDATE users SET online=TRUE,last_seen=%s WHERE id=%s', (now(),u['id']))
+
+    # Streak logic
+    today = time.strftime('%Y-%m-%d')
+    last_date = u.get('last_login_date','')
+    streak = u.get('streak') or 0
+    if last_date == today:
+        pass  # same day, no change
+    elif last_date == time.strftime('%Y-%m-%d', time.gmtime(time.time()-86400)):
+        streak += 1  # consecutive day
+    else:
+        streak = 1   # broken streak
+
+    cur.execute('UPDATE users SET online=TRUE,last_seen=%s,streak=%s,last_login_date=%s WHERE id=%s',
+                (now(), streak, today, u['id']))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE) ON CONFLICT DO NOTHING',
                 ('community',u['id']))
     conn.commit(); conn.close()
@@ -265,6 +308,8 @@ def get_users(me):
         d['flux_coins'] = d.get('flux_coins') or 0
         d['premium'] = bool(d.get('premium'))
         d['bio'] = d.get('bio') or ''
+        d['premium_features'] = json.loads(d.get('premium_features') or '{}')
+        d['streak'] = d.get('streak') or 0
         result.append(d)
     return jsonify(result)
 
@@ -275,7 +320,41 @@ def get_user_route(me, uid):
     if not u: return jsonify({'error':'Not found'}), 404
     return jsonify(u)
 
-# ── PROFILE UPDATE ────────────────────────────
+# ─────────────────────────────────────────────
+# SEARCH — users and channels by username
+# ─────────────────────────────────────────────
+@app.route('/api/search')
+@auth
+def search(me):
+    q = request.args.get('q','').strip().lower().lstrip('@')
+    if len(q) < 2: return jsonify({'users':[],'chats':[]})
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT * FROM users WHERE banned=FALSE AND id!=%s AND
+                   (LOWER(username) LIKE %s OR LOWER(nick) LIKE %s)
+                   LIMIT 20''', (me['id'], f'%{q}%', f'%{q}%'))
+    user_rows = cur.fetchall()
+    cur.execute('''SELECT * FROM chats WHERE type IN ('channel','group') AND
+                   (LOWER(username) LIKE %s OR LOWER(name) LIKE %s)
+                   LIMIT 20''', (f'%{q}%', f'%{q}%'))
+    chat_rows = cur.fetchall()
+    conn.close()
+    users_out = []
+    for u in user_rows:
+        d = dict(u); d.pop('password',None)
+        d['online'] = bool(d.get('online') and now()-(d.get('last_seen') or 0)<15000)
+        d['privacy'] = json.loads(d.get('privacy') or '{}')
+        d['flux_coins'] = d.get('flux_coins') or 0
+        d['premium'] = bool(d.get('premium'))
+        d['bio'] = d.get('bio') or ''
+        users_out.append(d)
+    chats_out = []
+    for c in chat_rows:
+        chats_out.append(dict(c))
+    return jsonify({'users': users_out, 'chats': chats_out})
+
+# ─────────────────────────────────────────────
+# PROFILE UPDATE
+# ─────────────────────────────────────────────
 @app.route('/api/users/me/profile', methods=['PUT'])
 @auth
 def update_profile(me):
@@ -285,6 +364,7 @@ def update_profile(me):
     avatar   = d.get('avatar')
     bio      = d.get('bio','').strip()[:200]
     privacy  = d.get('privacy')
+    pf       = d.get('premium_features')
     if not nick or not username:
         return jsonify({'error':'Заполните поля'}), 400
     conn = get_db(); cur = conn.cursor()
@@ -295,10 +375,11 @@ def update_profile(me):
         cur.execute('UPDATE users SET avatar=%s WHERE id=%s', (avatar,me['id']))
     if privacy is not None:
         cur.execute('UPDATE users SET privacy=%s WHERE id=%s', (json.dumps(privacy),me['id']))
+    if pf is not None:
+        cur.execute('UPDATE users SET premium_features=%s WHERE id=%s', (json.dumps(pf),me['id']))
     conn.commit(); conn.close()
     return jsonify(get_user(me['id']))
 
-# ── CHANGE PASSWORD ───────────────────────────
 @app.route('/api/users/me/change-password', methods=['POST'])
 @auth
 def change_password(me):
@@ -318,12 +399,11 @@ def change_password(me):
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
-# ── CHANGE EMAIL ──────────────────────────────
 @app.route('/api/users/me/change-email', methods=['POST'])
 @auth
 def change_email(me):
     d = request.json or {}
-    password = d.get('password','')
+    password  = d.get('password','')
     new_email = d.get('new_email','').strip().lower()
     if not password or not new_email:
         return jsonify({'error':'Заполните поля'}), 400
@@ -339,21 +419,72 @@ def change_email(me):
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
-# ── FLUX PREMIUM ──────────────────────────────
+# ─────────────────────────────────────────────
+# FLUX PREMIUM
+# ─────────────────────────────────────────────
 @app.route('/api/users/me/buy-premium', methods=['POST'])
 @auth
 def buy_premium(me):
     if me.get('premium'):
         return jsonify({'error':'У вас уже есть Flux Premium'}), 400
-    if me.get('flux_coins',0) < PREMIUM_PRICE:
+    if (me.get('flux_coins') or 0) < PREMIUM_PRICE:
         return jsonify({'error':f'Недостаточно Flux Coins. Нужно {PREMIUM_PRICE}'}), 400
     conn = get_db(); cur = conn.cursor()
     cur.execute('UPDATE users SET premium=TRUE,flux_coins=flux_coins-%s WHERE id=%s',
-                (PREMIUM_PRICE,me['id']))
+                (PREMIUM_PRICE, me['id']))
     conn.commit(); conn.close()
     return jsonify({'ok':True,'user':get_user(me['id'])})
 
-# ── GIVE FLUX COINS (bloody only) ─────────────
+# ─────────────────────────────────────────────
+# FLUX COINS TRANSFER (user→user)
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/transfer-coins', methods=['POST'])
+@auth
+def transfer_coins(me):
+    d = request.json or {}
+    to_username = d.get('username','').strip().lstrip('@')
+    amount = d.get('amount', 0)
+    note = d.get('note','').strip()[:100]
+    if not to_username:
+        return jsonify({'error':'Укажи username получателя'}), 400
+    if not amount or amount < 1:
+        return jsonify({'error':'Минимальный перевод: 1 монета'}), 400
+    if (me.get('flux_coins') or 0) < amount:
+        return jsonify({'error':'Недостаточно Flux Coins'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT id,nick,flux_coins FROM users WHERE username=%s', (to_username,))
+    target = cur.fetchone()
+    if not target:
+        conn.close(); return jsonify({'error':f'Пользователь @{to_username} не найден'}), 404
+    if target['id'] == me['id']:
+        conn.close(); return jsonify({'error':'Нельзя переводить самому себе'}), 400
+    cur.execute('UPDATE users SET flux_coins=flux_coins-%s WHERE id=%s', (amount, me['id']))
+    cur.execute('UPDATE users SET flux_coins=flux_coins+%s WHERE id=%s', (amount, target['id']))
+    cur.execute('INSERT INTO coin_transfers (from_id,to_id,amount,note,created_at) VALUES (%s,%s,%s,%s,%s)',
+                (me['id'], target['id'], amount, note, now()))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'message':f'Переведено {amount} монет → @{to_username}','user':get_user(me['id'])})
+
+@app.route('/api/users/me/coin-history')
+@auth
+def coin_history(me):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT ct.*, 
+                   uf.nick as from_nick, uf.username as from_username,
+                   ut.nick as to_nick, ut.username as to_username
+                   FROM coin_transfers ct
+                   LEFT JOIN users uf ON uf.id=ct.from_id
+                   LEFT JOIN users ut ON ut.id=ct.to_id
+                   WHERE ct.from_id=%s OR ct.to_id=%s
+                   ORDER BY ct.created_at DESC LIMIT 30''',
+                (me['id'], me['id']))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+# ─────────────────────────────────────────────
+# GIVE COINS (bloody only)
+# ─────────────────────────────────────────────
 @app.route('/api/admin/give-coins', methods=['POST'])
 @auth
 def give_coins(me):
@@ -361,19 +492,21 @@ def give_coins(me):
         return jsonify({'error':'Forbidden'}), 403
     d = request.json or {}
     target_username = d.get('username','').strip().lstrip('@')
-    amount = d.get('amount',0)
+    amount = d.get('amount', 0)
     if not target_username or amount <= 0:
         return jsonify({'error':'Укажи username и количество'}), 400
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT id,username,flux_coins FROM users WHERE username=%s', (target_username,))
+    cur.execute('SELECT id,nick FROM users WHERE username=%s', (target_username,))
     target = cur.fetchone()
     if not target:
-        conn.close(); return jsonify({'error':f'Пользователь @{target_username} не найден'}), 404
-    cur.execute('UPDATE users SET flux_coins=flux_coins+%s WHERE id=%s', (amount,target['id']))
+        conn.close(); return jsonify({'error':f'@{target_username} не найден'}), 404
+    cur.execute('UPDATE users SET flux_coins=flux_coins+%s WHERE id=%s', (amount, target['id']))
     conn.commit(); conn.close()
-    return jsonify({'ok':True,'message':f'Выдано {amount} Flux Coins пользователю @{target_username}'})
+    return jsonify({'ok':True,'message':f'Выдано {amount} Flux Coins → @{target_username}'})
 
-# ── ADMIN ACTIONS ─────────────────────────────
+# ─────────────────────────────────────────────
+# ADMIN
+# ─────────────────────────────────────────────
 @app.route('/api/admin/users/<uid>/action', methods=['POST'])
 @auth
 def admin_action(me, uid):
@@ -385,12 +518,11 @@ def admin_action(me, uid):
         return jsonify({'error':'Нельзя'}), 403
     d = request.json or {}; a = d.get('action')
     conn = get_db(); cur = conn.cursor()
-    if   a == 'ban':    cur.execute('UPDATE users SET banned=TRUE WHERE id=%s',(uid,))
-    elif a == 'unban':  cur.execute('UPDATE users SET banned=FALSE WHERE id=%s',(uid,))
-    elif a == 'mute':   cur.execute('UPDATE users SET muted=TRUE WHERE id=%s',(uid,))
-    elif a == 'unmute': cur.execute('UPDATE users SET muted=FALSE WHERE id=%s',(uid,))
-    elif a == 'verify_premium':
-        cur.execute('UPDATE users SET premium=TRUE WHERE id=%s',(uid,))
+    if   a == 'ban':           cur.execute('UPDATE users SET banned=TRUE WHERE id=%s',(uid,))
+    elif a == 'unban':         cur.execute('UPDATE users SET banned=FALSE WHERE id=%s',(uid,))
+    elif a == 'mute':          cur.execute('UPDATE users SET muted=TRUE WHERE id=%s',(uid,))
+    elif a == 'unmute':        cur.execute('UPDATE users SET muted=FALSE WHERE id=%s',(uid,))
+    elif a == 'verify_premium':cur.execute('UPDATE users SET premium=TRUE WHERE id=%s',(uid,))
     elif a == 'give_role':
         r = d.get('role')
         if r not in ('user','admin','creator','tester'):
@@ -398,11 +530,36 @@ def admin_action(me, uid):
         if r == 'creator' and me.get('username') != 'bloody':
             conn.close(); return jsonify({'error':'Только bloody'}), 403
         cur.execute('UPDATE users SET role=%s WHERE id=%s',(r,uid))
-    else: conn.close(); return jsonify({'error':'Unknown'}), 400
+    else: conn.close(); return jsonify({'error':'Unknown action'}), 400
     conn.commit(); conn.close()
     return jsonify({'ok':True,'user':get_user(uid)})
 
-# ── CHATS ─────────────────────────────────────
+@app.route('/api/admin/stats')
+@auth
+def admin_stats(me):
+    if me.get('username') != 'bloody' and me['role'] != 'creator':
+        return jsonify({'error':'Forbidden'}), 403
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) as c FROM users')
+    uc = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM chats')
+    cc = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM messages WHERE is_system=FALSE')
+    mc = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM users WHERE online=TRUE AND last_seen>%s',(now()-15000,))
+    oc = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM users WHERE banned=TRUE')
+    bc = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM users WHERE premium=TRUE')
+    pc = cur.fetchone()['c']
+    cur.execute('SELECT SUM(flux_coins) as s FROM users')
+    tc = cur.fetchone()['s'] or 0
+    conn.close()
+    return jsonify({'users':uc,'chats':cc,'messages':mc,'online':oc,'banned':bc,'premium':pc,'total_coins':tc})
+
+# ─────────────────────────────────────────────
+# CHATS
+# ─────────────────────────────────────────────
 @app.route('/api/chats')
 @auth
 def get_chats(me):
@@ -410,36 +567,37 @@ def get_chats(me):
     cur.execute('''SELECT cm.pinned as member_pinned, c.* FROM chat_members cm
                    JOIN chats c ON c.id=cm.chat_id
                    WHERE cm.user_id=%s ORDER BY cm.pinned DESC, c.created_at DESC''', (me['id'],))
-    chat_ids = [(r['id'], r['member_pinned']) for r in cur.fetchall()]
-    conn.close()
+    rows = cur.fetchall(); conn.close()
     result = []
-    for cid, pinned in chat_ids:
-        c = get_chat(cid)
-        if c: c['member_pinned'] = pinned; result.append(c)
+    for r in rows:
+        c = get_chat(r['id'])
+        if c: c['member_pinned'] = r['member_pinned']; result.append(c)
     return jsonify(result)
 
 @app.route('/api/chats', methods=['POST'])
 @auth
 def create_chat(me):
     d = request.json or {}
-    t = d.get('type','group'); name = d.get('name','').strip()
+    t = d.get('type','group')
+    name = d.get('name','').strip()
     ch_username = re.sub(r'[^a-z0-9_]','', d.get('username','').strip().lower()) if t=='channel' else None
     icon = d.get('icon','').strip() or ('📢' if t=='channel' else '👥')
-    if not name: return jsonify({'error':'Укажите название'}), 400
+    if not name: return jsonify({'error':'Укажи название'}), 400
     if t == 'channel' and not ch_username:
-        return jsonify({'error':'Укажите username канала'}), 400
+        return jsonify({'error':'Username канала обязателен'}), 400
     if ch_username:
         conn = get_db(); cur = conn.cursor()
         cur.execute('SELECT id FROM chats WHERE username=%s', (ch_username,))
-        if cur.fetchone(): conn.close(); return jsonify({'error':'Username канала занят'}), 400
+        if cur.fetchone(): conn.close(); return jsonify({'error':'Username занят'}), 400
         conn.close()
     cid = gid()
     conn = get_db(); cur = conn.cursor()
-    cur.execute('INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)',
+    cur.execute('''INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)''',
                 (cid,t,name,d.get('description',''),icon,ch_username,me['id'],now()))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,TRUE)', (cid,me['id']))
     conn.commit(); conn.close()
-    sys_msg(cid, f'{"Канал" if t=="channel" else "Группа"} "{name}" создан(а)')
+    sys_msg(cid, f'{"Канал" if t=="channel" else "Группа"} «{name}» создан(а)')
     return jsonify(get_chat(cid))
 
 @app.route('/api/chats/dm', methods=['POST'])
@@ -456,8 +614,8 @@ def create_dm(me):
     ex = cur.fetchone()
     if ex: conn.close(); return jsonify(get_chat(ex['chat_id']))
     cid = gid()
-    cur.execute('INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at) VALUES (%s,%s,NULL,%s,%s,NULL,%s,FALSE,FALSE,%s)',
-                (cid,'dm','','',me['id'],now()))
+    cur.execute('''INSERT INTO chats (id,type,name,description,icon,username,creator_id,pinned,verified,created_at)
+                   VALUES (%s,'dm',NULL,'','',NULL,%s,FALSE,FALSE,%s)''', (cid,me['id'],now()))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE)', (cid,me['id']))
     cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE)', (cid,oid))
     conn.commit(); conn.close()
@@ -466,11 +624,11 @@ def create_dm(me):
 @app.route('/api/chats/<cid>', methods=['PUT'])
 @auth
 def update_chat(me, cid):
-    if not is_chat_admin(me, cid): return jsonify({'error':'Forbidden'}), 403
+    if not is_chat_admin(me,cid): return jsonify({'error':'Forbidden'}), 403
     d = request.json or {}
     conn = get_db(); cur = conn.cursor()
     for k in ('name','description','icon'):
-        if k in d: cur.execute(f'UPDATE chats SET {k}=%s WHERE id=%s', (d[k],cid))
+        if k in d: cur.execute(f'UPDATE chats SET {k}=%s WHERE id=%s',(d[k],cid))
     conn.commit(); conn.close()
     return jsonify(get_chat(cid))
 
@@ -480,10 +638,10 @@ def delete_chat(me, cid):
     if me['role'] not in ('admin','creator') and not is_chat_admin(me,cid):
         return jsonify({'error':'Forbidden'}), 403
     conn = get_db(); cur = conn.cursor()
-    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)', (cid,))
-    cur.execute('DELETE FROM messages WHERE chat_id=%s', (cid,))
-    cur.execute('DELETE FROM chat_members WHERE chat_id=%s', (cid,))
-    cur.execute('DELETE FROM chats WHERE id=%s', (cid,))
+    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)',(cid,))
+    cur.execute('DELETE FROM messages WHERE chat_id=%s',(cid,))
+    cur.execute('DELETE FROM chat_members WHERE chat_id=%s',(cid,))
+    cur.execute('DELETE FROM chats WHERE id=%s',(cid,))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
@@ -492,7 +650,7 @@ def delete_chat(me, cid):
 def pin_chat(me, cid):
     pinned = (request.json or {}).get('pinned', True)
     conn = get_db(); cur = conn.cursor()
-    cur.execute('UPDATE chat_members SET pinned=%s WHERE chat_id=%s AND user_id=%s', (pinned,cid,me['id']))
+    cur.execute('UPDATE chat_members SET pinned=%s WHERE chat_id=%s AND user_id=%s',(pinned,cid,me['id']))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
@@ -502,9 +660,9 @@ def verify_chat(me, cid):
     if me.get('username') != 'bloody': return jsonify({'error':'Forbidden'}), 403
     verified = (request.json or {}).get('verified', True)
     conn = get_db(); cur = conn.cursor()
-    cur.execute('UPDATE chats SET verified=%s WHERE id=%s', (verified,cid))
+    cur.execute('UPDATE chats SET verified=%s WHERE id=%s',(verified,cid))
     conn.commit(); conn.close()
-    sys_msg(cid, '✅ Канал верифицирован' if verified else '❌ Верификация снята')
+    sys_msg(cid,'✅ Канал верифицирован' if verified else '❌ Верификация снята')
     return jsonify({'ok':True})
 
 @app.route('/api/chats/<cid>/members', methods=['POST'])
@@ -513,19 +671,19 @@ def add_member(me, cid):
     if not is_chat_admin(me,cid): return jsonify({'error':'Forbidden'}), 403
     uid = (request.json or {}).get('user_id')
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT username FROM users WHERE id=%s', (uid,))
+    cur.execute('SELECT username FROM users WHERE id=%s',(uid,))
     u = cur.fetchone()
-    if not u: conn.close(); return jsonify({'error':'User not found'}), 404
-    cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE) ON CONFLICT DO NOTHING', (cid,uid))
+    if not u: conn.close(); return jsonify({'error':'Not found'}), 404
+    cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,FALSE) ON CONFLICT DO NOTHING',(cid,uid))
     conn.commit(); conn.close()
-    sys_msg(cid, f'➕ @{u["username"]} добавлен в чат')
+    sys_msg(cid, f'➕ @{u["username"]} добавлен')
     return jsonify({'ok':True})
 
 @app.route('/api/chats/<cid>/leave', methods=['POST'])
 @auth
 def leave_chat(me, cid):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('DELETE FROM chat_members WHERE chat_id=%s AND user_id=%s', (cid,me['id']))
+    cur.execute('DELETE FROM chat_members WHERE chat_id=%s AND user_id=%s',(cid,me['id']))
     conn.commit(); conn.close()
     sys_msg(cid, f'🚪 @{me["username"]} покинул(а) чат')
     return jsonify({'ok':True})
@@ -535,33 +693,32 @@ def leave_chat(me, cid):
 def clear_chat(me, cid):
     if not is_chat_admin(me,cid): return jsonify({'error':'Forbidden'}), 403
     conn = get_db(); cur = conn.cursor()
-    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)', (cid,))
-    cur.execute('DELETE FROM messages WHERE chat_id=%s', (cid,))
+    cur.execute('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=%s)',(cid,))
+    cur.execute('DELETE FROM messages WHERE chat_id=%s',(cid,))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
-# ── MESSAGES ──────────────────────────────────
+# ─────────────────────────────────────────────
+# MESSAGES
+# ─────────────────────────────────────────────
 @app.route('/api/chats/<cid>/messages')
 @auth
 def get_messages(me, cid):
     if not is_member(me['id'],cid): return jsonify({'error':'Not a member'}), 403
     since = request.args.get('since',0,type=int)
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM messages WHERE chat_id=%s AND timestamp>%s ORDER BY timestamp ASC', (cid,since))
+    cur.execute('SELECT * FROM messages WHERE chat_id=%s AND timestamp>%s ORDER BY timestamp ASC',(cid,since))
     msgs = cur.fetchall()
     result = []
     for m in msgs:
         d = dict(m); d['system'] = d.pop('is_system',False)
-        cur.execute('SELECT emoji,COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji', (m['id'],))
+        cur.execute('SELECT emoji,COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji',(m['id'],))
         d['reactions'] = [dict(r) for r in cur.fetchall()]
-        cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (m['id'],me['id']))
-        my_r = cur.fetchone()
-        d['my_reaction'] = my_r['emoji'] if my_r else None
-        # Fetch reply_to message
+        cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s',(m['id'],me['id']))
+        mr = cur.fetchone(); d['my_reaction'] = mr['emoji'] if mr else None
         if d.get('reply_to'):
-            cur.execute('SELECT id,sender_nick,text FROM messages WHERE id=%s', (d['reply_to'],))
-            rep = cur.fetchone()
-            d['reply_to_msg'] = dict(rep) if rep else None
+            cur.execute('SELECT id,sender_nick,text FROM messages WHERE id=%s',(d['reply_to'],))
+            rep = cur.fetchone(); d['reply_to_msg'] = dict(rep) if rep else None
         result.append(d)
     conn.close()
     return jsonify(result)
@@ -571,9 +728,9 @@ def get_messages(me, cid):
 def send_message(me, cid):
     if not is_member(me['id'],cid): return jsonify({'error':'Not a member'}), 403
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM chats WHERE id=%s', (cid,))
+    cur.execute('SELECT * FROM chats WHERE id=%s',(cid,))
     c = cur.fetchone(); conn.close()
-    if not c: return jsonify({'error':'Chat not found'}), 404
+    if not c: return jsonify({'error':'Not found'}), 404
     if c['type'] == 'channel' and not is_chat_admin(me,cid):
         return jsonify({'error':'Only admins can post'}), 403
     if me.get('muted') and me['role'] not in ('admin','creator'):
@@ -591,57 +748,48 @@ def send_message(me, cid):
                    VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)''',
                 (mid,cid,me['id'],me['nick'],text,reply_to,forwarded_from,now()))
     conn.commit()
-    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    cur.execute('SELECT * FROM messages WHERE id=%s',(mid,))
     msg = dict(cur.fetchone()); conn.close()
     msg['system'] = msg.pop('is_system',False)
     msg['reactions'] = []; msg['my_reaction'] = None
-    # Fetch reply_to
     if msg.get('reply_to'):
-        rep = get_message_brief(msg['reply_to'])
-        msg['reply_to_msg'] = rep
+        conn = get_db(); cur = conn.cursor()
+        cur.execute('SELECT id,sender_nick,text FROM messages WHERE id=%s',(msg['reply_to'],))
+        rep = cur.fetchone(); conn.close()
+        msg['reply_to_msg'] = dict(rep) if rep else None
     return jsonify(msg)
 
-# ── FORWARD MESSAGE ───────────────────────────
 @app.route('/api/messages/<mid>/forward', methods=['POST'])
 @auth
 def forward_message(me, mid):
-    d = request.json or {}
-    target_cids = d.get('chat_ids', [])
+    target_cids = (request.json or {}).get('chat_ids',[])
     if not target_cids: return jsonify({'error':'Укажи чаты'}), 400
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    cur.execute('SELECT * FROM messages WHERE id=%s',(mid,))
     orig = cur.fetchone()
     if not orig: conn.close(); return jsonify({'error':'Not found'}), 404
     forwarded = []
-    for tcid in target_cids[:5]:  # Max 5 chats at once
-        if not is_member(me['id'], tcid): continue
+    for tcid in target_cids[:5]:
+        if not is_member(me['id'],tcid): continue
         new_mid = gid()
-        forward_text = orig['text']
-        orig_nick = orig['sender_nick'] or 'Пользователь'
         cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,forwarded_from,is_system,pinned,timestamp)
                        VALUES (%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)''',
-                    (new_mid,tcid,me['id'],me['nick'],forward_text,orig_nick,now()))
+                    (new_mid,tcid,me['id'],me['nick'],orig['text'],orig['sender_nick'],now()))
         forwarded.append(tcid)
     conn.commit(); conn.close()
     return jsonify({'ok':True,'forwarded_to':forwarded})
-
-def get_message_brief(mid):
-    conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT id,sender_nick,text FROM messages WHERE id=%s', (mid,))
-    r = cur.fetchone(); conn.close()
-    return dict(r) if r else None
 
 @app.route('/api/messages/<mid>/delete', methods=['POST'])
 @auth
 def delete_message(me, mid):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    cur.execute('SELECT * FROM messages WHERE id=%s',(mid,))
     msg = cur.fetchone()
     if not msg: conn.close(); return jsonify({'error':'Not found'}), 404
-    if msg['sender_id'] != me['id'] and not is_chat_admin(me, msg['chat_id']):
+    if msg['sender_id'] != me['id'] and not is_chat_admin(me,msg['chat_id']):
         conn.close(); return jsonify({'error':'Forbidden'}), 403
-    cur.execute('DELETE FROM reactions WHERE message_id=%s', (mid,))
-    cur.execute('DELETE FROM messages WHERE id=%s', (mid,))
+    cur.execute('DELETE FROM reactions WHERE message_id=%s',(mid,))
+    cur.execute('DELETE FROM messages WHERE id=%s',(mid,))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
@@ -649,12 +797,12 @@ def delete_message(me, mid):
 @auth
 def pin_message(me, mid):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    cur.execute('SELECT * FROM messages WHERE id=%s',(mid,))
     msg = cur.fetchone()
     if not msg: conn.close(); return jsonify({'error':'Not found'}), 404
-    if not is_chat_admin(me, msg['chat_id']): conn.close(); return jsonify({'error':'Forbidden'}), 403
-    pinned = (request.json or {}).get('pinned', True)
-    cur.execute('UPDATE messages SET pinned=%s WHERE id=%s', (pinned,mid))
+    if not is_chat_admin(me,msg['chat_id']): conn.close(); return jsonify({'error':'Forbidden'}), 403
+    pinned = (request.json or {}).get('pinned',True)
+    cur.execute('UPDATE messages SET pinned=%s WHERE id=%s',(pinned,mid))
     conn.commit(); conn.close()
     return jsonify({'ok':True})
 
@@ -663,24 +811,26 @@ def pin_message(me, mid):
 def react_message(me, mid):
     emoji = (request.json or {}).get('emoji','')
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
-    existing = cur.fetchone()
-    if existing:
-        if existing['emoji'] == emoji:
-            cur.execute('DELETE FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
+    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s',(mid,me['id']))
+    ex = cur.fetchone()
+    if ex:
+        if ex['emoji'] == emoji:
+            cur.execute('DELETE FROM reactions WHERE message_id=%s AND user_id=%s',(mid,me['id']))
         else:
-            cur.execute('UPDATE reactions SET emoji=%s WHERE message_id=%s AND user_id=%s', (emoji,mid,me['id']))
+            cur.execute('UPDATE reactions SET emoji=%s WHERE message_id=%s AND user_id=%s',(emoji,mid,me['id']))
     else:
-        cur.execute('INSERT INTO reactions (message_id,user_id,emoji) VALUES (%s,%s,%s)', (mid,me['id'],emoji))
+        cur.execute('INSERT INTO reactions (message_id,user_id,emoji) VALUES (%s,%s,%s)',(mid,me['id'],emoji))
     conn.commit()
-    cur.execute('SELECT emoji,COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji', (mid,))
+    cur.execute('SELECT emoji,COUNT(*) as cnt FROM reactions WHERE message_id=%s GROUP BY emoji',(mid,))
     reactions = [dict(r) for r in cur.fetchall()]
-    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s', (mid,me['id']))
-    my_r = cur.fetchone()
+    cur.execute('SELECT emoji FROM reactions WHERE message_id=%s AND user_id=%s',(mid,me['id']))
+    mr = cur.fetchone()
     conn.close()
-    return jsonify({'ok':True,'reactions':reactions,'my_reaction':my_r['emoji'] if my_r else None})
+    return jsonify({'ok':True,'reactions':reactions,'my_reaction':mr['emoji'] if mr else None})
 
-# ── COMMANDS ──────────────────────────────────
+# ─────────────────────────────────────────────
+# COMMANDS
+# ─────────────────────────────────────────────
 def handle_cmd(me, cid, text):
     parts = text[1:].split()
     cmd = parts[0].lower() if parts else ''
@@ -691,34 +841,31 @@ def handle_cmd(me, cid, text):
     def fu(name):
         if not name: return None
         n = name.lstrip('@')
-        cur.execute('SELECT * FROM users WHERE username=%s OR id=%s', (n,n))
+        cur.execute('SELECT * FROM users WHERE username=%s OR id=%s',(n,n))
         u = cur.fetchone()
         return dict(u) if u else None
 
-    simple = {
-        'ban':    ('banned',True,  '🔨 @{u} заблокирован'),
-        'unban':  ('banned',False, '✅ @{u} разблокирован'),
-        'mute':   ('muted', True,  '🔇 @{u} замьючен'),
-        'unmute': ('muted', False, '🔊 @{u} размьючен'),
-    }
-    if cmd in simple:
+    if cmd in ('ban','unban','mute','unmute'):
         t = fu(a1)
         if not t: conn.close(); return {'error':'Не найден'}
         if t['role']=='creator' and me.get('username')!='bloody': conn.close(); return {'error':'Нельзя'}
-        field,val,tmpl = simple[cmd]
-        cur.execute(f'UPDATE users SET {field}=%s WHERE id=%s',(val,t['id']))
+        fields = {'ban':('banned',True),'unban':('banned',False),'mute':('muted',True),'unmute':('muted',False)}
+        f,v = fields[cmd]
+        cur.execute(f'UPDATE users SET {f}=%s WHERE id=%s',(v,t['id']))
         conn.commit(); conn.close()
-        sys_msg(cid, tmpl.replace('{u}',t['username']))
+        msgs = {'ban':'🔨 @{u} заблокирован','unban':'✅ @{u} разблокирован',
+                'mute':'🔇 @{u} замьючен','unmute':'🔊 @{u} размьючен'}
+        sys_msg(cid, msgs[cmd].replace('{u}',t['username']))
         return {'ok':True,'command':cmd}
 
     if cmd == 'give_role':
         t = fu(a1)
         if not t or not a2: conn.close(); return {'error':'Укажи @user и роль'}
-        if a2 not in ('user','admin','creator','tester'): conn.close(); return {'error':'user/admin/creator/tester'}
+        if a2 not in ('user','admin','creator','tester'): conn.close(); return {'error':'Неверная роль'}
         if a2=='creator' and me.get('username')!='bloody': conn.close(); return {'error':'Только bloody'}
         cur.execute('UPDATE users SET role=%s WHERE id=%s',(a2,t['id']))
         conn.commit(); conn.close()
-        sys_msg(cid,f'👑 @{t["username"]} → роль: {a2}')
+        sys_msg(cid,f'👑 @{t["username"]} → {a2}')
         return {'ok':True,'command':cmd}
 
     if cmd == 'give_coins':
@@ -729,20 +876,15 @@ def handle_cmd(me, cid, text):
         except: conn.close(); return {'error':'Неверное количество'}
         cur.execute('UPDATE users SET flux_coins=flux_coins+%s WHERE id=%s',(amount,t['id']))
         conn.commit(); conn.close()
-        sys_msg(cid,f'⚡ @{t["username"]} получил {amount} Flux Coins!')
+        sys_msg(cid,f'🪙 @{t["username"]} получил {amount} Flux Coins!')
         return {'ok':True,'command':cmd}
 
     if cmd == 'verify':
         t_chat = a1
-        if not t_chat: conn.close(); return {'error':'Укажи ID или username'}
+        if not t_chat: conn.close(); return {'error':'Укажи username'}
         cur.execute('UPDATE chats SET verified=TRUE WHERE id=%s OR username=%s',(t_chat,t_chat))
         conn.commit(); conn.close()
         sys_msg(cid,'✅ Канал верифицирован')
-        return {'ok':True,'command':cmd}
-
-    if cmd == 'announce':
-        conn.close()
-        sys_msg('community','📢 Объявление: '+' '.join(parts[1:]))
         return {'ok':True,'command':cmd}
 
     if cmd == 'kick':
@@ -755,42 +897,37 @@ def handle_cmd(me, cid, text):
 
     if cmd == 'pin':
         cur.execute('SELECT id FROM messages WHERE chat_id=%s ORDER BY timestamp DESC LIMIT 1',(cid,))
-        msg = cur.fetchone()
-        if msg:
-            cur.execute('UPDATE messages SET pinned=TRUE WHERE id=%s',(msg['id'],))
-            conn.commit()
-        conn.close()
-        sys_msg(cid,'📌 Сообщение закреплено')
+        m = cur.fetchone()
+        if m: cur.execute('UPDATE messages SET pinned=TRUE WHERE id=%s',(m['id'],)); conn.commit()
+        conn.close(); sys_msg(cid,'📌 Сообщение закреплено')
         return {'ok':True,'command':cmd}
 
     if cmd == 'rename':
         new_name = ' '.join(parts[1:])
-        if new_name:
-            cur.execute('UPDATE chats SET name=%s WHERE id=%s',(new_name,cid))
-            conn.commit()
-        conn.close()
-        sys_msg(cid,f'✏️ Переименован: {new_name}')
+        if new_name: cur.execute('UPDATE chats SET name=%s WHERE id=%s',(new_name,cid)); conn.commit()
+        conn.close(); sys_msg(cid,f'✏️ Переименован: {new_name}')
         return {'ok':True,'command':cmd}
 
     if cmd == 'stats':
-        cur.execute('SELECT COUNT(*) as cnt FROM users')
-        u_cnt = cur.fetchone()['cnt']
-        cur.execute('SELECT COUNT(*) as cnt FROM messages WHERE is_system=FALSE')
-        m_cnt = cur.fetchone()['cnt']
-        conn.close()
-        sys_msg(cid,f'📊 {u_cnt} юзеров | {m_cnt} сообщений')
+        cur.execute('SELECT COUNT(*) as c FROM users')
+        uc = cur.fetchone()['c']
+        cur.execute('SELECT COUNT(*) as c FROM messages WHERE is_system=FALSE')
+        mc = cur.fetchone()['c']
+        conn.close(); sys_msg(cid,f'📊 {uc} пользователей · {mc} сообщений')
+        return {'ok':True,'command':cmd}
+
+    if cmd == 'announce':
+        conn.close(); sys_msg('community','📢 '+' '.join(parts[1:]))
         return {'ok':True,'command':cmd}
 
     if cmd == 'broadcast':
         msg_text = ' '.join(parts[1:])
         if msg_text:
             cur.execute('SELECT DISTINCT chat_id FROM chat_members')
-            chat_ids = [r['chat_id'] for r in cur.fetchall()]
+            cids = [r['chat_id'] for r in cur.fetchall()]
             conn.close()
-            for chat_id in chat_ids:
-                sys_msg(chat_id,f'📢 Broadcast: {msg_text}')
-        else:
-            conn.close()
+            for chat_id in cids: sys_msg(chat_id,f'📢 {msg_text}')
+        else: conn.close()
         return {'ok':True,'command':cmd}
 
     if cmd == 'delete_chat':
@@ -805,7 +942,157 @@ def handle_cmd(me, cid, text):
     conn.close()
     return {'error':f'Неизвестная команда: /{cmd}'}
 
-# ── STATIC ────────────────────────────────────
+# ─────────────────────────────────────────────
+# SEARCH — by username/name
+# ─────────────────────────────────────────────
+@app.route('/api/search')
+@auth
+def search(me):
+    q = request.args.get('q','').strip().lower().lstrip('@')
+    if len(q) < 2: return jsonify({'users':[],'chats':[]})
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT * FROM users WHERE banned=FALSE AND id!=%s AND
+                   (LOWER(username) LIKE %s OR LOWER(nick) LIKE %s) LIMIT 20''',
+                (me['id'], f'%{q}%', f'%{q}%'))
+    user_rows = cur.fetchall()
+    cur.execute('''SELECT * FROM chats WHERE type IN ('channel','group') AND
+                   (LOWER(COALESCE(username,'')) LIKE %s OR LOWER(name) LIKE %s) LIMIT 20''',
+                (f'%{q}%', f'%{q}%'))
+    chat_rows = cur.fetchall(); conn.close()
+    users_out = []
+    for u in user_rows:
+        d = dict(u); d.pop('password',None)
+        d['online'] = bool(d.get('online') and now()-(d.get('last_seen') or 0)<15000)
+        d['premium'] = bool(d.get('premium'))
+        d['bio'] = d.get('bio') or ''
+        d['flux_coins'] = d.get('flux_coins') or 0
+        d['privacy'] = json.loads(d.get('privacy') or '{}')
+        users_out.append(d)
+    return jsonify({'users': users_out, 'chats': [dict(c) for c in chat_rows]})
+
+# ─────────────────────────────────────────────
+# COIN TRANSFER (user → user)
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/transfer-coins', methods=['POST'])
+@auth
+def transfer_coins(me):
+    d = request.json or {}
+    to_username = d.get('username','').strip().lstrip('@')
+    amount = int(d.get('amount', 0))
+    note = d.get('note','').strip()[:100]
+    if not to_username: return jsonify({'error':'Укажи получателя'}), 400
+    if amount < 1: return jsonify({'error':'Минимум 1 монета'}), 400
+    if (me.get('flux_coins') or 0) < amount:
+        return jsonify({'error':'Недостаточно Flux Coins'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT id,nick,flux_coins FROM users WHERE username=%s', (to_username,))
+    target = cur.fetchone()
+    if not target: conn.close(); return jsonify({'error':f'@{to_username} не найден'}), 404
+    if target['id'] == me['id']: conn.close(); return jsonify({'error':'Нельзя себе'}), 400
+    cur.execute('UPDATE users SET flux_coins=flux_coins-%s WHERE id=%s', (amount,me['id']))
+    cur.execute('UPDATE users SET flux_coins=flux_coins+%s WHERE id=%s', (amount,target['id']))
+    try:
+        cur.execute('''CREATE TABLE IF NOT EXISTS coin_transfers
+            (id SERIAL PRIMARY KEY, from_id TEXT, to_id TEXT,
+             amount INTEGER, note TEXT DEFAULT '', created_at BIGINT DEFAULT 0)''')
+        cur.execute('INSERT INTO coin_transfers (from_id,to_id,amount,note,created_at) VALUES (%s,%s,%s,%s,%s)',
+                    (me['id'],target['id'],amount,note,now()))
+    except: pass
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'message':f'Переведено {amount} монет → @{to_username}','user':get_user(me['id'])})
+
+@app.route('/api/users/me/coin-history')
+@auth
+def coin_history(me):
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute('''SELECT ct.*,
+                       uf.nick as from_nick, uf.username as from_username,
+                       ut.nick as to_nick, ut.username as to_username
+                       FROM coin_transfers ct
+                       LEFT JOIN users uf ON uf.id=ct.from_id
+                       LEFT JOIN users ut ON ut.id=ct.to_id
+                       WHERE ct.from_id=%s OR ct.to_id=%s
+                       ORDER BY ct.created_at DESC LIMIT 20''', (me['id'],me['id']))
+        rows = [dict(r) for r in cur.fetchall()]
+    except: rows = []
+    conn.close()
+    return jsonify(rows)
+
+# ─────────────────────────────────────────────
+# STREAK / DAILY BONUS
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/daily-bonus', methods=['POST'])
+@auth
+def daily_bonus(me):
+    today = time.strftime('%Y-%m-%d')
+    last = me.get('last_login_date','')
+    streak = me.get('streak') or 1
+    conn = get_db(); cur = conn.cursor()
+    # Check cooldown — only once per day
+    if last == today:
+        conn.close(); return jsonify({'error':'Уже получен сегодня'}), 400
+    # Streak
+    yesterday = time.strftime('%Y-%m-%d', time.gmtime(time.time()-86400))
+    if last == yesterday:
+        streak = min(streak+1, 30)
+    else:
+        streak = 1
+    # Bonus calculation
+    base = 50
+    bonus = base * streak
+    if me.get('premium'): bonus = int(bonus * 1.5)  # Premium: +50% bonus
+    cur.execute('UPDATE users SET flux_coins=flux_coins+%s, streak=%s, last_login_date=%s WHERE id=%s',
+                (bonus, streak, today, me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'coins_earned':bonus,'streak':streak,'user':get_user(me['id'])})
+
+# ─────────────────────────────────────────────
+# SAVED MESSAGES (bookmark)
+# ─────────────────────────────────────────────
+@app.route('/api/messages/<mid>/save', methods=['POST'])
+@auth
+def save_message(me, mid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT * FROM messages WHERE id=%s', (mid,))
+    msg = cur.fetchone()
+    if not msg: conn.close(); return jsonify({'error':'Not found'}), 404
+    # Find or create personal saved chat
+    cur.execute("SELECT id FROM chats WHERE type='saved' AND creator_id=%s", (me['id'],))
+    sc = cur.fetchone()
+    if not sc:
+        scid = gid()
+        cur.execute("INSERT INTO chats (id,type,name,icon,creator_id,created_at) VALUES (%s,'saved','Сохранённые','🔖',%s,%s)",
+                    (scid,me['id'],now()))
+        cur.execute('INSERT INTO chat_members (chat_id,user_id,is_admin) VALUES (%s,%s,TRUE)', (scid,me['id']))
+        saved_cid = scid
+    else:
+        saved_cid = sc['id']
+    new_mid = gid()
+    cur.execute('''INSERT INTO messages (id,chat_id,sender_id,sender_nick,text,forwarded_from,is_system,pinned,timestamp)
+                   VALUES (%s,%s,%s,%s,%s,%s,FALSE,FALSE,%s)''',
+                (new_mid,saved_cid,me['id'],me['nick'],msg['text'],msg['sender_nick'],now()))
+    conn.commit(); conn.close()
+    return jsonify({'ok':True,'saved_chat_id':saved_cid})
+
+# ─────────────────────────────────────────────
+# ONLINE STATS (lightweight)
+# ─────────────────────────────────────────────
+@app.route('/api/stats/online')
+@auth
+def online_stats(me):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) as c FROM users WHERE online=TRUE AND last_seen>%s AND banned=FALSE',
+                (now()-15000,))
+    online = cur.fetchone()['c']
+    cur.execute('SELECT COUNT(*) as c FROM users WHERE banned=FALSE')
+    total = cur.fetchone()['c']
+    conn.close()
+    return jsonify({'online':online,'total':total})
+
+# ─────────────────────────────────────────────
+# STATIC
+# ─────────────────────────────────────────────
 @app.route('/', defaults={'path':''})
 @app.route('/<path:path>')
 def serve(path):
@@ -819,3 +1106,4 @@ init_db()
 if __name__ == '__main__':
     port = int(os.environ.get('PORT',5000))
     app.run(host='0.0.0.0',port=port,debug=False)
+
