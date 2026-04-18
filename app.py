@@ -94,6 +94,10 @@ def get_user(uid):
     d['premium_features'] = json.loads(d.get('premium_features') or '{}')
     d['streak'] = d.get('streak') or 0
     d['last_login_date'] = d.get('last_login_date') or ''
+    d['reputation'] = d.get('reputation') or 0
+    d['rep_count'] = d.get('rep_count') or 0
+    d['status_text'] = d.get('status_text') or ''
+    d['msg_color'] = d.get('msg_color') or ''
     return d
 
 def init_db():
@@ -113,7 +117,12 @@ def init_db():
         premium BOOLEAN DEFAULT FALSE,
         premium_features TEXT DEFAULT '{}',
         streak INTEGER DEFAULT 0,
-        last_login_date TEXT DEFAULT ''
+        last_login_date TEXT DEFAULT '',
+        reputation INTEGER DEFAULT 0,
+        rep_count INTEGER DEFAULT 0,
+        status_text TEXT DEFAULT '',
+        msg_color TEXT DEFAULT '',
+        unread_counts TEXT DEFAULT '{}'
     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS chats (
@@ -164,10 +173,23 @@ def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_date TEXT DEFAULT ''",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT DEFAULT NULL",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS forwarded_from TEXT DEFAULT NULL",
+        "ALTER TABLE chats ADD COLUMN IF NOT EXISTS icon TEXT DEFAULT NULL",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reputation INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS rep_count INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS status_text TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS msg_color TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS unread_counts TEXT DEFAULT '{}'",
         """CREATE TABLE IF NOT EXISTS coin_transfers (
             id SERIAL PRIMARY KEY, from_id TEXT, to_id TEXT,
             amount INTEGER DEFAULT 0, note TEXT DEFAULT '',
             created_at BIGINT DEFAULT 0)""",
+        """CREATE TABLE IF NOT EXISTS reputation_votes (
+            id SERIAL PRIMARY KEY,
+            from_id TEXT NOT NULL,
+            to_id TEXT NOT NULL,
+            vote SMALLINT DEFAULT 1,
+            created_at BIGINT DEFAULT 0,
+            UNIQUE(from_id, to_id))""",
     ]
     for m in migrations:
         try: cur.execute(m); conn.commit()
@@ -330,11 +352,11 @@ def search(me):
     if len(q) < 2: return jsonify({'users':[],'chats':[]})
     conn = get_db(); cur = conn.cursor()
     cur.execute('''SELECT * FROM users WHERE banned=FALSE AND id!=%s AND
-                   (LOWER(username) LIKE %s OR LOWER(nick) LIKE %s)
+                   (LOWER(COALESCE(username,'')) LIKE %s OR LOWER(nick) LIKE %s)
                    LIMIT 20''', (me['id'], f'%{q}%', f'%{q}%'))
     user_rows = cur.fetchall()
     cur.execute('''SELECT * FROM chats WHERE type IN ('channel','group') AND
-                   (LOWER(username) LIKE %s OR LOWER(name) LIKE %s)
+                   (LOWER(COALESCE(username,'')) LIKE %s OR LOWER(name) LIKE %s)
                    LIMIT 20''', (f'%{q}%', f'%{q}%'))
     chat_rows = cur.fetchall()
     conn.close()
@@ -1089,6 +1111,198 @@ def online_stats(me):
     total = cur.fetchone()['c']
     conn.close()
     return jsonify({'online':online,'total':total})
+
+# ─────────────────────────────────────────────
+# REPUTATION SYSTEM
+# ─────────────────────────────────────────────
+@app.route('/api/users/<uid>/rep', methods=['POST'])
+@auth
+def vote_rep(me, uid):
+    if uid == me['id']:
+        return jsonify({'error':'Нельзя голосовать за себя'}), 400
+    vote = (request.json or {}).get('vote', 1)
+    if vote not in (1, -1):
+        return jsonify({'error':'vote должен быть 1 или -1'}), 400
+    # Premium: can vote once per day per user, others: once per week
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT * FROM reputation_votes WHERE from_id=%s AND to_id=%s',
+                (me['id'], uid))
+    existing = cur.fetchone()
+    if existing:
+        # Allow change within cooldown window
+        cooldown = 86400000 if me.get('premium') else 604800000  # 1d / 7d in ms
+        if now() - existing['created_at'] < cooldown:
+            conn.close()
+            return jsonify({'error':'Ещё не время голосовать снова'}), 429
+        # Update
+        old_vote = existing['vote']
+        cur.execute('UPDATE reputation_votes SET vote=%s, created_at=%s WHERE from_id=%s AND to_id=%s',
+                    (vote, now(), me['id'], uid))
+        diff = vote - old_vote
+    else:
+        cur.execute('INSERT INTO reputation_votes (from_id,to_id,vote,created_at) VALUES (%s,%s,%s,%s)',
+                    (me['id'], uid, vote, now()))
+        diff = vote
+    cur.execute('UPDATE users SET reputation=reputation+%s, rep_count=rep_count+1 WHERE id=%s',
+                (diff, uid))
+    conn.commit()
+    cur.execute('SELECT reputation, rep_count FROM users WHERE id=%s', (uid,))
+    row = cur.fetchone(); conn.close()
+    return jsonify({'ok': True, 'reputation': row['reputation'], 'rep_count': row['rep_count']})
+
+@app.route('/api/users/<uid>/rep')
+@auth
+def get_rep(me, uid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT reputation, rep_count FROM users WHERE id=%s', (uid,))
+    row = cur.fetchone()
+    cur.execute('SELECT vote FROM reputation_votes WHERE from_id=%s AND to_id=%s', (me['id'], uid))
+    my_vote = cur.fetchone()
+    conn.close()
+    if not row: return jsonify({'error':'Not found'}), 404
+    return jsonify({
+        'reputation': row['reputation'],
+        'rep_count': row['rep_count'],
+        'my_vote': my_vote['vote'] if my_vote else 0
+    })
+
+@app.route('/api/top/reputation')
+@auth
+def top_rep(me):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT id,nick,username,avatar,premium,reputation,rep_count,role
+                   FROM users WHERE banned=FALSE
+                   ORDER BY reputation DESC LIMIT 20''')
+    rows = cur.fetchall(); conn.close()
+    return jsonify([dict(r) for r in rows])
+
+# ─────────────────────────────────────────────
+# PREMIUM: STATUS TEXT + MSG COLOR
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/status', methods=['POST'])
+@auth
+def set_status(me):
+    if not me.get('premium'):
+        return jsonify({'error':'Только для Flux Premium'}), 403
+    status = (request.json or {}).get('status', '').strip()[:50]
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE users SET status_text=%s WHERE id=%s', (status, me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'status_text': status})
+
+@app.route('/api/users/me/msg-color', methods=['POST'])
+@auth
+def set_msg_color(me):
+    if not me.get('premium'):
+        return jsonify({'error':'Только для Flux Premium'}), 403
+    color = (request.json or {}).get('color', '').strip()[:20]
+    # Validate hex color
+    if color and not re.match(r'^#[0-9a-fA-F]{6}$', color):
+        return jsonify({'error':'Неверный формат цвета (#RRGGBB)'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE users SET msg_color=%s WHERE id=%s', (color, me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'msg_color': color})
+
+# ─────────────────────────────────────────────
+# REPUTATION SYSTEM
+# ─────────────────────────────────────────────
+@app.route('/api/users/<uid>/reputation', methods=['POST'])
+@auth
+def vote_reputation(me, uid):
+    if uid == me['id']:
+        return jsonify({'error':'Нельзя голосовать за себя'}), 400
+    vote = (request.json or {}).get('vote', 1)
+    if vote not in (1, -1):
+        return jsonify({'error':'Голос: 1 или -1'}), 400
+    conn = get_db(); cur = conn.cursor()
+    # Check target exists
+    cur.execute('SELECT id,reputation,rep_count FROM users WHERE id=%s AND banned=FALSE', (uid,))
+    target = cur.fetchone()
+    if not target:
+        conn.close(); return jsonify({'error':'Пользователь не найден'}), 404
+    # Upsert vote
+    cur.execute('SELECT vote FROM reputation_votes WHERE from_id=%s AND to_id=%s', (me['id'], uid))
+    existing = cur.fetchone()
+    old_vote = existing['vote'] if existing else 0
+    if existing:
+        if old_vote == vote:
+            # Remove vote (toggle off)
+            cur.execute('DELETE FROM reputation_votes WHERE from_id=%s AND to_id=%s', (me['id'], uid))
+            diff = -vote
+        else:
+            cur.execute('UPDATE reputation_votes SET vote=%s WHERE from_id=%s AND to_id=%s', (vote, me['id'], uid))
+            diff = vote - old_vote
+    else:
+        cur.execute('INSERT INTO reputation_votes (from_id,to_id,vote,created_at) VALUES (%s,%s,%s,%s)',
+                    (me['id'], uid, vote, now()))
+        diff = vote
+    # Update user reputation
+    new_rep = (target['reputation'] or 0) + diff
+    new_count = (target['rep_count'] or 0) + (1 if not existing else 0) + (-1 if existing and old_vote == vote else 0)
+    cur.execute('UPDATE users SET reputation=%s, rep_count=%s WHERE id=%s',
+                (new_rep, max(0, new_count), uid))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'reputation': new_rep, 'my_vote': 0 if (existing and old_vote == vote) else vote})
+
+@app.route('/api/users/<uid>/reputation', methods=['GET'])
+@auth
+def get_reputation(me, uid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('SELECT reputation, rep_count FROM users WHERE id=%s', (uid,))
+    u = cur.fetchone()
+    if not u: conn.close(); return jsonify({'error':'Not found'}), 404
+    cur.execute('SELECT vote FROM reputation_votes WHERE from_id=%s AND to_id=%s', (me['id'], uid))
+    my = cur.fetchone()
+    conn.close()
+    return jsonify({'reputation': u['reputation'] or 0, 'rep_count': u['rep_count'] or 0,
+                    'my_vote': my['vote'] if my else 0})
+
+@app.route('/api/top/reputation')
+@auth
+def top_reputation(me):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT id,nick,username,avatar,role,premium,reputation,rep_count,streak
+                   FROM users WHERE banned=FALSE ORDER BY reputation DESC LIMIT 20''')
+    rows = cur.fetchall(); conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d['premium'] = bool(d.get('premium'))
+        result.append(d)
+    return jsonify(result)
+
+# ─────────────────────────────────────────────
+# PREMIUM: STATUS TEXT
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/status', methods=['POST'])
+@auth
+def set_status(me):
+    if not me.get('premium'):
+        return jsonify({'error':'Только для Flux Premium'}), 403
+    text = (request.json or {}).get('text', '').strip()[:60]
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE users SET status_text=%s WHERE id=%s', (text, me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'status_text': text})
+
+# ─────────────────────────────────────────────
+# PREMIUM: CUSTOM MESSAGE COLOR
+# ─────────────────────────────────────────────
+@app.route('/api/users/me/msg-color', methods=['POST'])
+@auth
+def set_msg_color(me):
+    if not me.get('premium'):
+        return jsonify({'error':'Только для Flux Premium'}), 403
+    color = (request.json or {}).get('color', '').strip()
+    # Only allow safe hex colors
+    import re as _re
+    if color and not _re.match(r'^#[0-9a-fA-F]{6}$', color):
+        return jsonify({'error':'Неверный формат цвета (#RRGGBB)'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('UPDATE users SET msg_color=%s WHERE id=%s', (color, me['id']))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'msg_color': color})
 
 # ─────────────────────────────────────────────
 # STATIC
